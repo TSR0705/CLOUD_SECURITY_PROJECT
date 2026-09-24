@@ -10,15 +10,15 @@ Both **LocalStack S3** and **fake-gcs-server JSON API** were tested with automat
 
 ## Environment
 
-| Component            | Version / Specification                             | Notes                                             |
-| :------------------- | :-------------------------------------------------- | :------------------------------------------------ |
-| **Operating System** | Windows 11 Pro (WSL 2 backend)                      | Kernel 6.18.33.2-microsoft-standard-WSL2          |
-| **Docker Engine**    | 29.6.1 (Docker Desktop)                             | WSL 2 Engine integration                          |
-| **LocalStack**       | 2026.8.4 (image: `localstack/localstack:2026.08.3`) | Community S3 service on port 4566                 |
-| **fake-GCS Server**  | 1.56.1 (image: `fsouza/fake-gcs-server:1.56.1`)     | HTTP JSON API on port 4443                        |
-| **PostgreSQL**       | 18 (image: `postgres:18-alpine`)                    | Infrastructure availability verified on port 5432 |
-| **Node.js**          | 24.14.0 (Active LTS)                                | Host execution runtime                            |
-| **pnpm**             | 12.5.1 (Corepack pinned)                            | Monorepo package manager                          |
+| Component            | Version / Specification                                                        | Notes                                             |
+| :------------------- | :----------------------------------------------------------------------------- | :------------------------------------------------ |
+| **Operating System** | Windows 11 Pro (WSL 2 backend)                                                 | Kernel 6.18.33.2-microsoft-standard-WSL2          |
+| **Docker Engine**    | 29.6.1 (Docker Desktop)                                                        | WSL 2 Engine integration                          |
+| **LocalStack**       | 3.8.1 (zero-token Community) & 2026.8.4 (image: `localstack/localstack:3.8.1`) | Community S3 service on port 4566                 |
+| **fake-GCS Server**  | 1.56.1 (image: `fsouza/fake-gcs-server:1.56.1`)                                | HTTP JSON API on port 4443                        |
+| **PostgreSQL**       | 18 (image: `postgres:18-alpine`)                                               | Infrastructure availability verified on port 5432 |
+| **Node.js**          | 24.14.0 (Active LTS)                                                           | Host execution runtime                            |
+| **pnpm**             | 12.5.1 (Corepack pinned)                                                       | Monorepo package manager                          |
 
 ---
 
