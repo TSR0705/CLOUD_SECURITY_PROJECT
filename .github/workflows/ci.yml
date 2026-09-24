@@ -52,8 +52,16 @@ jobs:
       - name: Run strict typechecking (TypeScript 6.0.3)
         run: pnpm typecheck
 
+      - name: Start local storage emulators (Docker Compose)
+        run: |
+          docker compose -f infrastructure/docker/docker-compose.yml up -d
+
       - name: Run test suite (Vitest 5)
         run: pnpm test
+
+      - name: Stop local storage emulators
+        if: always()
+        run: docker compose -f infrastructure/docker/docker-compose.yml down
 
       - name: Build packages
         run: pnpm build

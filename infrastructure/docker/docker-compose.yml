@@ -19,7 +19,7 @@ services:
       start_period: 10s
 
   localstack:
-    image: localstack/localstack:2026.08.3
+    image: localstack/localstack:3.8.1
     container_name: sug-localstack
     restart: unless-stopped
     ports:

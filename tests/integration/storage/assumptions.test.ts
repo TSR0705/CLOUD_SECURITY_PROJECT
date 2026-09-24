@@ -28,19 +28,30 @@ describe('Storage Assumption Spike (P2)', () => {
       forcePathStyle: true,
     });
 
-    // Ensure S3 quarantine bucket exists with versioning
-    try {
-      await s3.send(new HeadBucketCommand({ Bucket: S3_QUARANTINE_BUCKET }));
-    } catch {
-      await s3.send(new CreateBucketCommand({ Bucket: S3_QUARANTINE_BUCKET }));
+    // Ensure S3 quarantine bucket exists with versioning (with retry for emulator readiness)
+    let s3Ready = false;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      try {
+        try {
+          await s3.send(new HeadBucketCommand({ Bucket: S3_QUARANTINE_BUCKET }));
+        } catch {
+          await s3.send(new CreateBucketCommand({ Bucket: S3_QUARANTINE_BUCKET }));
+        }
+        await s3.send(
+          new PutBucketVersioningCommand({
+            Bucket: S3_QUARANTINE_BUCKET,
+            VersioningConfiguration: { Status: 'Enabled' },
+          }),
+        );
+        s3Ready = true;
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
     }
-
-    await s3.send(
-      new PutBucketVersioningCommand({
-        Bucket: S3_QUARANTINE_BUCKET,
-        VersioningConfiguration: { Status: 'Enabled' },
-      }),
-    );
+    if (!s3Ready) {
+      throw new Error(`Could not connect to LocalStack S3 emulator at ${S3_ENDPOINT}`);
+    }
 
     // Ensure GCS replica bucket exists
     const gcsBucketRes = await fetch(`${GCS_ENDPOINT}/storage/v1/b/${GCS_REPLICA_BUCKET}`);
