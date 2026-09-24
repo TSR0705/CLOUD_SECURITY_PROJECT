@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: sug-postgres
+    restart: unless-stopped
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: sug
+      POSTGRES_USER: sug_admin
+      POSTGRES_PASSWORD: sug_dev_password
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sug_admin -d sug']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  localstack:
+    image: localstack/localstack:2026.08.3
+    container_name: sug-localstack
+    restart: unless-stopped
+    ports:
+      - '4566:4566'
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: us-east-1
+      DEFAULT_REGION: us-east-1
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./init/init-s3.sh:/etc/localstack/init/ready.d/init-s3.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:4566/_localstack/health || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+
+  fake-gcs-server:
+    image: fsouza/fake-gcs-server:1.56.1
+    container_name: sug-fake-gcs
+    restart: unless-stopped
+    ports:
+      - '4443:4443'
+    command:
+      - '-scheme'
+      - 'http'
+      - '-port'
+      - '4443'
+      - '-external-url'
+      - 'http://localhost:4443'
+      - '-public-host'
+      - 'localhost:4443'
+      - '-data'
+      - '/data'
+      - '-backend'
+      - 'filesystem'
+      - '-filesystem-root'
+      - '/storage'
+    volumes:
+      - fake_gcs_data:/storage
+      - ./init/data:/data:ro
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:4443/storage/v1/b']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  postgres_data:
+    name: sug_postgres_data
+  localstack_data:
+    name: sug_localstack_data
+  fake_gcs_data:
+    name: sug_fake_gcs_data

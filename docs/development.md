@@ -66,3 +66,51 @@ Every pull request and push to `main` triggers GitHub Actions (`.github/workflow
 4. `corepack pnpm test`
 5. `corepack pnpm format:check`
 6. `gitleaks` secret detection scan
+
+---
+
+## 6. Local Infrastructure (Docker Compose)
+
+The local emulator infrastructure is managed via Docker Compose (`infrastructure/docker/docker-compose.yml`):
+
+### Starting Services
+
+```bash
+# Copy example environment configuration if .env does not exist
+cp .env.example .env
+
+# Start all emulator services in the background
+docker compose --env-file .env -f infrastructure/docker/docker-compose.yml up -d
+
+# Verify all services are healthy
+docker compose -f infrastructure/docker/docker-compose.yml ps
+```
+
+### Viewing Logs
+
+```bash
+# Stream all logs
+docker compose -f infrastructure/docker/docker-compose.yml logs -f
+
+# Stream specific service logs
+docker compose -f infrastructure/docker/docker-compose.yml logs -f localstack
+docker compose -f infrastructure/docker/docker-compose.yml logs -f fake-gcs-server
+docker compose -f infrastructure/docker/docker-compose.yml logs -f postgres
+```
+
+### Stopping Services
+
+```bash
+# Stop containers (preserves persistent volumes)
+docker compose -f infrastructure/docker/docker-compose.yml down
+
+# Stop containers and remove volumes (clean slate)
+docker compose -f infrastructure/docker/docker-compose.yml down -v
+```
+
+### Running Storage Integration Tests
+
+```bash
+# Run the storage assumption spike against live containers
+corepack pnpm test
+```
