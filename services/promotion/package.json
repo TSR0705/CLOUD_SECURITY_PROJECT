@@ -1,0 +1,18 @@
+{
+  "name": "@sug/service-promotion",
+  "version": "0.1.0",
+  "description": "Exact-artifact promotion and clean storage writer service",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sug/shared": "workspace:*",
+    "@sug/crypto": "workspace:*",
+    "@sug/storage": "workspace:*",
+    "@sug/decision-engine": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@sug/api",
+  "version": "0.1.0",
+  "description": "Edge API gateway Fastify service",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sug/shared": "workspace:*",
+    "@sug/storage": "workspace:*",
+    "@sug/policy-engine": "workspace:*"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@sug/demo-client",
+  "version": "0.1.0",
+  "description": "Demonstration and benchmarking upload client",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sug/shared": "workspace:*",
+    "@sug/sdk": "workspace:*"
+  }
+}

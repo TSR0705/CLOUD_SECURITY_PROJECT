@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+coverage/
+.next/
+out/
+DOCUMENTS/
+pnpm-lock.yaml
+.git/
+
+# Frozen P0 documentation
+README.md
+docs/adr/
+docs/threat-model.md
+docs/attack-taxonomy.md
+docs/decision-register.md
+docs/risk-register.md
+docs/research-hypotheses.md
+docs/scope-and-boundaries.md

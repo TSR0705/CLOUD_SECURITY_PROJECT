@@ -1,0 +1,12 @@
+{
+  "name": "@sug/shared",
+  "version": "0.1.0",
+  "description": "Core shared types and contracts across the gateway",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  }
+}

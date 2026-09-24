@@ -1,0 +1,20 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/storage" },
+    { "path": "./packages/policy-engine" },
+    { "path": "./packages/security-engine" },
+    { "path": "./packages/scanner" },
+    { "path": "./packages/decision-engine" },
+    { "path": "./packages/crypto" },
+    { "path": "./packages/audit" },
+    { "path": "./packages/sdk" },
+    { "path": "./services/api" },
+    { "path": "./services/scanner" },
+    { "path": "./services/promotion" },
+    { "path": "./services/replication" },
+    { "path": "./apps/dashboard" },
+    { "path": "./apps/demo-client" }
+  ]
+}

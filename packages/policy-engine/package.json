@@ -1,0 +1,15 @@
+{
+  "name": "@sug/policy-engine",
+  "version": "0.1.0",
+  "description": "Policy evaluation schemas and precheck logic",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sug/shared": "workspace:*"
+  }
+}

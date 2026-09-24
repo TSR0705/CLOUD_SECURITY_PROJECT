@@ -1,0 +1,15 @@
+{
+  "name": "@sug/scanner",
+  "version": "0.1.0",
+  "description": "Antivirus and YARA scanner adapters and protocol contracts",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sug/shared": "workspace:*"
+  }
+}

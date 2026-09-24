@@ -1,0 +1,14 @@
+# Enforce LF line endings across all text files
+* text=auto
+* text eol=lf
+
+# Explicit binary files
+*.docx binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.tar.gz binary
