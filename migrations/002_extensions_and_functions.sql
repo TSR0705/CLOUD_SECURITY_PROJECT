@@ -1,0 +1,16 @@
+-- Up Migration
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS citext;
+
+CREATE OR REPLACE FUNCTION forbid_mutation()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+END;
+$$;
+
+-- Down Migration
+DROP FUNCTION IF EXISTS forbid_mutation CASCADE;
+DROP EXTENSION IF EXISTS citext;
+DROP EXTENSION IF EXISTS pgcrypto;
