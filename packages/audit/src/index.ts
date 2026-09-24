@@ -14,3 +14,5 @@ export const AuditInfo: AuditInfo = {
   name: AuditPackageName,
   version: '0.1.0',
 };
+
+export * from './verify.js';

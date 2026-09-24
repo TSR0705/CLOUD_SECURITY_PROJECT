@@ -14,3 +14,5 @@ export const SharedInfo: SharedInfo = {
   name: SharedPackageName,
   version: '0.1.0',
 };
+
+export type * from './db.js';

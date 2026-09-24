@@ -11,5 +11,8 @@
   },
   "dependencies": {
     "@sug/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.6"
   }
 }

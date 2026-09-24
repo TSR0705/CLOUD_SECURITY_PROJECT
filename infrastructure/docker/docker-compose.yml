@@ -4,7 +4,7 @@ services:
     container_name: sug-postgres
     restart: unless-stopped
     ports:
-      - '5432:5432'
+      - '${POSTGRES_PORT:-5432}:5432'
     environment:
       POSTGRES_DB: sug
       POSTGRES_USER: sug_admin
