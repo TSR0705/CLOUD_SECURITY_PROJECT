@@ -1,0 +1,134 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Secure Upload Gateway API",
+    "description": "Edge API gateway for secure multi-engine file analysis, policy validation, and quarantined upload processing.",
+    "version": "0.1.0"
+  },
+  "components": {
+    "schemas": {
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "urn:sug:error:validation"
+          },
+          "title": {
+            "type": "string",
+            "example": "Validation Error"
+          },
+          "status": {
+            "type": "integer",
+            "example": 400
+          },
+          "detail": {
+            "type": "string",
+            "example": "Invalid request parameter"
+          },
+          "instance": {
+            "type": "string",
+            "example": "/readyz"
+          },
+          "requestId": {
+            "type": "string",
+            "example": "c0a80101-0000-0000-0000-000000000000"
+          }
+        },
+        "required": ["type", "title", "status", "detail", "instance", "requestId"]
+      }
+    },
+    "headers": {
+      "X-Request-ID": {
+        "description": "Unique correlation ID for tracing the request lifecycle",
+        "schema": {
+          "type": "string",
+          "example": "c0a80101-0000-0000-0000-000000000000"
+        }
+      }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Process liveness probe",
+        "tags": ["Health"],
+        "description": "Answers whether the API process is alive. Does not perform I/O or query dependencies.",
+        "responses": {
+          "200": {
+            "description": "API process is healthy and alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "API process is healthy and alive",
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ok"],
+                      "example": "ok"
+                    }
+                  },
+                  "required": ["status"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Dependency readiness probe",
+        "tags": ["Health"],
+        "description": "Verifies reachability of core infrastructure dependencies (PostgreSQL database and S3 storage) before accepting traffic.",
+        "responses": {
+          "200": {
+            "description": "All core dependencies are reachable and ready to process traffic",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "All core dependencies are reachable and ready to process traffic",
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ready"],
+                      "example": "ready"
+                    }
+                  },
+                  "required": ["status"]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "One or more core dependencies are unreachable or degraded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "One or more core dependencies are unreachable or degraded",
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["not_ready"],
+                      "example": "not_ready"
+                    }
+                  },
+                  "required": ["status"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Gateway Local / Target Environment"
+    }
+  ]
+}

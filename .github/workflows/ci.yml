@@ -52,6 +52,12 @@ jobs:
       - name: Run strict typechecking (TypeScript 6.0.3)
         run: pnpm typecheck
 
+      - name: Build packages
+        run: pnpm build
+
+      - name: Validate OpenAPI specification
+        run: pnpm openapi:check
+
       - name: Generate local development secrets
         run: bash scripts/gen-secrets.sh
 
@@ -74,9 +80,6 @@ jobs:
       - name: Stop infrastructure services
         if: always()
         run: docker compose -f infrastructure/docker/docker-compose.yml down
-
-      - name: Build packages
-        run: pnpm build
 
       - name: Secret Detection (Gitleaks)
         uses: gitleaks/gitleaks-action@v2

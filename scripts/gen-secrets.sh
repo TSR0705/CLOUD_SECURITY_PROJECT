@@ -91,13 +91,9 @@ if [ ! -f "$SECRETS_DIR/checkpoint_private_key.pem" ] && [ ! -f "$SECRETS_DIR/ch
   cp "$SECRETS_DIR/checkpoint_private_key.pem" "$SECRETS_DIR/checkpoint_private_key"
 fi
 
-# 5. Generate Database Password
+# 5. Generate Database Password (matches docker-compose local dev password)
 if [ ! -f "$SECRETS_DIR/db_password" ]; then
-  if [ "$USE_OPENSSL" -eq 1 ]; then
-    openssl rand -hex 24 > "$SECRETS_DIR/db_password"
-  else
-    node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))" > "$SECRETS_DIR/db_password"
-  fi
+  printf 'sug_dev_password' > "$SECRETS_DIR/db_password"
 fi
 
 # 6. Generate AWS Secret Access Key (Local development placeholder or test key)
