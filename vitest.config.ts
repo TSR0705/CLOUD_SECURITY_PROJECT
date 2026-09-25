@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   resolve: {
     alias: {
+      '@sug/shared/config': path.resolve(__dirname, 'packages/shared/src/config.ts'),
       '@sug/shared': path.resolve(__dirname, 'packages/shared/src/index.ts'),
       '@sug/audit': path.resolve(__dirname, 'packages/audit/src/index.ts'),
       '@sug/storage': path.resolve(__dirname, 'packages/storage/src/index.ts'),

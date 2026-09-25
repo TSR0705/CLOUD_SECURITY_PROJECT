@@ -1,0 +1,4 @@
+# Gitleaks ignore file
+# Used to ignore known local development artifacts
+/path/.env:generic-api-key:2
+.env:generic-api-key:2

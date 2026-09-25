@@ -77,3 +77,15 @@ volumes:
     name: sug_localstack_data
   fake_gcs_data:
     name: sug_fake_gcs_data
+
+secrets:
+  pepper:
+    file: ../../secrets/pepper
+  kek:
+    file: ../../secrets/kek
+  jwt_private_key:
+    file: ../../secrets/jwt_private_key.pem
+  checkpoint_private_key:
+    file: ../../secrets/checkpoint_private_key.pem
+  db_password:
+    file: ../../secrets/db_password

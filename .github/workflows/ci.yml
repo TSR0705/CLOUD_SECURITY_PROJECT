@@ -52,6 +52,9 @@ jobs:
       - name: Run strict typechecking (TypeScript 6.0.3)
         run: pnpm typecheck
 
+      - name: Generate local development secrets
+        run: bash scripts/gen-secrets.sh
+
       - name: Start infrastructure services (Docker Compose)
         run: |
           docker compose -f infrastructure/docker/docker-compose.yml up -d --wait
