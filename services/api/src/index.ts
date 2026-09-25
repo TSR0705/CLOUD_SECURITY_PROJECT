@@ -27,3 +27,8 @@ export * from './auth/keys.js';
 export * from './auth/service.js';
 export * from './auth/middleware.js';
 export * from './routes/auth.js';
+export * from './auth/session-types.js';
+export * from './auth/session-utils.js';
+export * from './auth/session-service.js';
+export * from './auth/tenant.js';
+export * from './routes/upload-auth.js';

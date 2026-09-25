@@ -9,3 +9,6 @@
 /path/.env:generic-api-key:2
 .env:generic-api-key:2
 
+# Test fixtures in P6 commit tests/unit/api/auth.test.ts
+5367952387baca5e38f00c011d1d5efdeefd7110:tests/unit/api/auth.test.ts:generic-api-key:94
+5367952387baca5e38f00c011d1d5efdeefd7110:tests/unit/api/auth.test.ts:generic-api-key:104

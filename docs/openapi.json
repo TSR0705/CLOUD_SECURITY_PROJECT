@@ -35,14 +35,7 @@
             "example": "c0a80101-0000-0000-0000-000000000000"
           }
         },
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "requestId"
-        ]
+        "required": ["type", "title", "status", "detail", "instance", "requestId"]
       }
     },
     "headers": {
@@ -67,9 +60,7 @@
     "/healthz": {
       "get": {
         "summary": "Process liveness probe",
-        "tags": [
-          "Health"
-        ],
+        "tags": ["Health"],
         "description": "Answers whether the API process is alive. Does not perform I/O or query dependencies.",
         "responses": {
           "200": {
@@ -82,15 +73,11 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "ok"
-                      ],
+                      "enum": ["ok"],
                       "example": "ok"
                     }
                   },
-                  "required": [
-                    "status"
-                  ]
+                  "required": ["status"]
                 }
               }
             }
@@ -101,9 +88,7 @@
     "/readyz": {
       "get": {
         "summary": "Dependency readiness probe",
-        "tags": [
-          "Health"
-        ],
+        "tags": ["Health"],
         "description": "Verifies reachability of core infrastructure dependencies (PostgreSQL database and S3 storage) before accepting traffic.",
         "responses": {
           "200": {
@@ -116,15 +101,11 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "ready"
-                      ],
+                      "enum": ["ready"],
                       "example": "ready"
                     }
                   },
-                  "required": [
-                    "status"
-                  ]
+                  "required": ["status"]
                 }
               }
             }
@@ -139,15 +120,11 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "not_ready"
-                      ],
+                      "enum": ["not_ready"],
                       "example": "not_ready"
                     }
                   },
-                  "required": [
-                    "status"
-                  ]
+                  "required": ["status"]
                 }
               }
             }
@@ -158,9 +135,7 @@
     "/api/v1/auth/probe": {
       "get": {
         "summary": "Verify API key credential",
-        "tags": [
-          "Authentication"
-        ],
+        "tags": ["Authentication"],
         "description": "Validates the provided Bearer API key in constant time and returns non-sensitive authenticated application context.",
         "security": [
           {
@@ -194,18 +169,10 @@
                       "items": {
                         "type": "string"
                       },
-                      "example": [
-                        "upload",
-                        "read"
-                      ]
+                      "example": ["upload", "read"]
                     }
                   },
-                  "required": [
-                    "status",
-                    "applicationId",
-                    "keyPrefix",
-                    "scopes"
-                  ]
+                  "required": ["status", "applicationId", "keyPrefix", "scopes"]
                 }
               }
             }
@@ -243,14 +210,7 @@
                       "example": "018f3a5e-7a42-7000-8000-000000000001"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail",
-                    "instance",
-                    "requestId"
-                  ]
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
                 }
               }
             }
@@ -288,14 +248,568 @@
                       "example": "018f3a5e-7a42-7000-8000-000000000001"
                     }
                   },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/upload/authorize": {
+      "post": {
+        "summary": "Authorize upload session",
+        "tags": ["Upload Authorization"],
+        "description": "Validates client upload parameters against application policy, bounds server-side expiration, and creates an upload session.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "declaredSize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 52428800
+                  },
+                  "declaredMime": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 127
+                  },
+                  "policyId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "declaredSha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{64}$"
+                  },
+                  "clientRef": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "durationSeconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 900
+                  },
+                  "applicationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": ["filename", "declaredSize", "declaredMime"]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Upload session authorized and reserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Upload session authorized and reserved",
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "applicationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "CREATED"
+                    },
+                    "quarantineKey": {
+                      "type": "string",
+                      "example": "incoming/uuid/uuid"
+                    },
+                    "tokenJti": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "policyId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "maxFileSize": {
+                      "type": "integer"
+                    },
+                    "declaredSize": {
+                      "type": "integer"
+                    },
+                    "declaredMime": {
+                      "type": "string"
+                    }
+                  },
                   "required": [
-                    "type",
-                    "title",
+                    "sessionId",
+                    "applicationId",
                     "status",
-                    "detail",
-                    "instance",
-                    "requestId"
+                    "quarantineKey",
+                    "tokenJti",
+                    "policyId",
+                    "expiresAt",
+                    "maxFileSize",
+                    "declaredSize",
+                    "declaredMime"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Validation error",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/authorize"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Unauthorized",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/authorize"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Forbidden",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/authorize"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict: No active policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Conflict: No active policy",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/authorize"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/upload/sessions/{id}": {
+      "get": {
+        "summary": "Get upload session details",
+        "tags": ["Upload Authorization"],
+        "description": "Retrieves upload session state strictly scoped to the authenticated application.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session details retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Session details retrieved",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "applicationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "quarantineKey": {
+                      "type": "string"
+                    },
+                    "originalFilename": {
+                      "type": "string"
+                    },
+                    "declaredSize": {
+                      "type": "integer"
+                    },
+                    "declaredMime": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "applicationId",
+                    "status",
+                    "quarantineKey",
+                    "originalFilename",
+                    "declaredSize",
+                    "declaredMime",
+                    "expiresAt",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Unauthorized",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/authorize"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Session not found",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/authorize"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/upload/sessions/{id}/abort": {
+      "post": {
+        "summary": "Abort upload session",
+        "tags": ["Upload Authorization"],
+        "description": "Aborts an active or created upload session for the authenticated application.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session aborted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Session aborted",
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "FAILED"
+                    }
+                  },
+                  "required": ["sessionId", "status"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Unauthorized",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/authorize"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Session not found",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/authorize"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
                 }
               }
             }

@@ -13,6 +13,8 @@ import { healthRoutes } from './routes/health.js';
 import { ApiKeyService } from './auth/service.js';
 import type { ApiKeyDatabase } from './auth/types.js';
 import { authRoutes } from './routes/auth.js';
+import { UploadAuthorizationService } from './auth/session-service.js';
+import { uploadAuthRoutes } from './routes/upload-auth.js';
 import pg from 'pg';
 
 export interface AppOptions {
@@ -20,6 +22,7 @@ export interface AppOptions {
   db?: ReadinessDatabase | undefined;
   storage?: ReadinessStorage | undefined;
   apiKeyService?: ApiKeyService | undefined;
+  uploadAuthService?: UploadAuthorizationService | undefined;
   authDb?: ApiKeyDatabase | undefined;
   logger?: boolean | object | undefined;
   rateLimitMax?: number | undefined;
@@ -184,21 +187,30 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
 
   // 7. API Key Authentication Service & Protected Routes
   let authPool: pg.Pool | undefined;
-  let apiKeyService = options.apiKeyService;
-  if (!apiKeyService) {
-    const authDb =
-      options.authDb ??
-      (() => {
-        authPool = new pg.Pool({ connectionString: config.database.url });
-        return authPool;
-      })();
-    apiKeyService = new ApiKeyService({
+  const authDb =
+    options.authDb ??
+    (() => {
+      authPool = new pg.Pool({ connectionString: config.database.url });
+      return authPool;
+    })();
+
+  const apiKeyService =
+    options.apiKeyService ??
+    new ApiKeyService({
       db: authDb,
       pepper: config.secrets.pepper,
     });
-  }
 
   await app.register(authRoutes, { apiKeyService });
+
+  // 8. Upload Authorization Service & Scoped Routes
+  const uploadAuthService =
+    options.uploadAuthService ??
+    new UploadAuthorizationService({
+      db: authDb,
+    });
+
+  await app.register(uploadAuthRoutes, { apiKeyService, uploadAuthService });
 
   // Clean shutdown hook
   app.addHook('onClose', async () => {
