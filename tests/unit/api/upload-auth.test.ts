@@ -371,9 +371,9 @@ describe('Phase P7: Upload Authorization Foundation (Unit Tests)', () => {
     const testAppId = crypto.randomUUID();
     const testKeyId = crypto.randomUUID();
     const testPrefix = 'a1b2c3d4';
-    const testSecret = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const testSecret = crypto.randomBytes(32).toString('hex');
     const testRawKey = `sug_${testPrefix}_${testSecret}`;
-    const testPepper = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const testPepper = crypto.randomBytes(32).toString('hex');
 
     beforeEach(async () => {
       const testKeyHmac = computeKeyHmac(testSecret, testPepper);

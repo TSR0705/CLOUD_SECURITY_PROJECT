@@ -12,3 +12,7 @@
 # Test fixtures in P6 commit tests/unit/api/auth.test.ts
 5367952387baca5e38f00c011d1d5efdeefd7110:tests/unit/api/auth.test.ts:generic-api-key:94
 5367952387baca5e38f00c011d1d5efdeefd7110:tests/unit/api/auth.test.ts:generic-api-key:104
+
+# Test fixtures in P7 commit tests/unit/api/upload-auth.test.ts
+ffcd9da9836926b3bc8d23ceca52128fef2e8d16:tests/unit/api/upload-auth.test.ts:generic-api-key:374
+
