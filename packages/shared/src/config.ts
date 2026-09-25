@@ -75,12 +75,17 @@ const kekSchema = z
 
 /**
  * Validates the API/key pepper for HMAC generation.
- * Requires high entropy (at least 32 characters / 256 bits).
+ * Cryptographic standard: generated as 32 cryptographically secure random bytes
+ * (64 hex characters = 256 bits entropy) or 32-byte base64 (44 characters).
+ * The schema enforces a minimum length of 32 characters.
  */
 const pepperSchema = z
   .string()
   .min(1, 'required secret is missing')
-  .min(32, 'must be at least 32 characters for sufficient entropy (256 bits)');
+  .min(
+    32,
+    'must be at least 32 characters (recommended: 32 random bytes as 64 hex characters for 256-bit entropy)',
+  );
 
 /**
  * Validates database password.
@@ -168,6 +173,10 @@ export interface DatabaseConfig {
   name: string;
 }
 
+export interface ServiceStorageConfig {
+  accessKeyId: string;
+}
+
 export interface StorageConfig {
   s3: {
     endpoint?: string | undefined;
@@ -181,6 +190,16 @@ export interface StorageConfig {
     replicaBucket: string;
     projectId: string;
   };
+  services: {
+    api: ServiceStorageConfig;
+    scanner: ServiceStorageConfig;
+    promoter: ServiceStorageConfig;
+    replicator: ServiceStorageConfig;
+  };
+}
+
+export interface ServiceStorageSecret {
+  secretAccessKey?: string | undefined;
 }
 
 export interface SecretsConfig {
@@ -190,6 +209,37 @@ export interface SecretsConfig {
   checkpointPrivateKey: string;
   dbPassword?: string | undefined;
   awsSecretAccessKey?: string | undefined;
+  services?:
+    | {
+        api?: ServiceStorageSecret | undefined;
+        scanner?: ServiceStorageSecret | undefined;
+        promoter?: ServiceStorageSecret | undefined;
+        replicator?: ServiceStorageSecret | undefined;
+      }
+    | undefined;
+}
+
+export interface ServiceStorageCredentials {
+  accessKeyId: string;
+  secretAccessKey?: string | undefined;
+}
+
+export type StorageServiceName = 'api' | 'scanner' | 'promoter' | 'replicator';
+
+/**
+ * Resolves effective storage credentials for a specific pipeline service.
+ * Supports least-privilege per-service overrides while falling back to base credentials.
+ */
+export function getServiceStorageCredentials(
+  config: Config | RedactedConfig,
+  service: StorageServiceName,
+): ServiceStorageCredentials {
+  const serviceConfig = config.storage.services[service];
+  const serviceSecret = config.secrets.services?.[service];
+  return {
+    accessKeyId: serviceConfig?.accessKeyId ?? config.storage.s3.accessKeyId,
+    secretAccessKey: serviceSecret?.secretAccessKey ?? config.secrets.awsSecretAccessKey,
+  };
 }
 
 export interface Config {
@@ -227,6 +277,14 @@ export interface RedactedConfig {
     checkpointPrivateKey: string;
     dbPassword?: string | undefined;
     awsSecretAccessKey?: string | undefined;
+    services?:
+      | {
+          api?: ServiceStorageSecret | undefined;
+          scanner?: ServiceStorageSecret | undefined;
+          promoter?: ServiceStorageSecret | undefined;
+          replicator?: ServiceStorageSecret | undefined;
+        }
+      | undefined;
   };
 }
 
@@ -239,6 +297,54 @@ export function redactConfig(config: Config | RedactedConfig): RedactedConfig {
     /(postgres(?:ql)?:\/\/[^:]+:)([^@]+)(@.+)/i,
     '$1[REDACTED]$3',
   );
+
+  const redactedServices:
+    | {
+        api?: ServiceStorageSecret;
+        scanner?: ServiceStorageSecret;
+        promoter?: ServiceStorageSecret;
+        replicator?: ServiceStorageSecret;
+      }
+    | undefined = config.secrets.services
+    ? {
+        ...(config.secrets.services.api
+          ? {
+              api: {
+                ...(config.secrets.services.api.secretAccessKey !== undefined
+                  ? { secretAccessKey: '[REDACTED]' }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(config.secrets.services.scanner
+          ? {
+              scanner: {
+                ...(config.secrets.services.scanner.secretAccessKey !== undefined
+                  ? { secretAccessKey: '[REDACTED]' }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(config.secrets.services.promoter
+          ? {
+              promoter: {
+                ...(config.secrets.services.promoter.secretAccessKey !== undefined
+                  ? { secretAccessKey: '[REDACTED]' }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(config.secrets.services.replicator
+          ? {
+              replicator: {
+                ...(config.secrets.services.replicator.secretAccessKey !== undefined
+                  ? { secretAccessKey: '[REDACTED]' }
+                  : {}),
+              },
+            }
+          : {}),
+      }
+    : undefined;
 
   return {
     nodeEnv: config.nodeEnv,
@@ -256,6 +362,12 @@ export function redactConfig(config: Config | RedactedConfig): RedactedConfig {
     storage: {
       s3: { ...config.storage.s3 },
       gcs: { ...config.storage.gcs },
+      services: {
+        api: { ...config.storage.services.api },
+        scanner: { ...config.storage.services.scanner },
+        promoter: { ...config.storage.services.promoter },
+        replicator: { ...config.storage.services.replicator },
+      },
     },
     secrets: {
       pepper: '[REDACTED]',
@@ -266,6 +378,7 @@ export function redactConfig(config: Config | RedactedConfig): RedactedConfig {
       ...(config.secrets.awsSecretAccessKey !== undefined
         ? { awsSecretAccessKey: '[REDACTED]' }
         : {}),
+      ...(redactedServices !== undefined ? { services: redactedServices } : {}),
     },
   };
 }
@@ -373,7 +486,7 @@ export function loadConfig(options: ConfigOptions = {}): Config {
   const gcsReplicaBucket = env.GCS_REPLICA_BUCKET ?? 'sug-replica-local';
   const gcsProjectId = env.GCS_PROJECT_ID ?? 'sug-local-project';
 
-  // Optional storage secret
+  // Base optional storage secret
   const awsSecRes = resolveSecret(
     'aws_secret_access_key',
     ['AWS_SECRET_ACCESS_KEY'],
@@ -390,6 +503,35 @@ export function loadConfig(options: ConfigOptions = {}): Config {
         key: 'AWS_SECRET_ACCESS_KEY',
         reason: valRes.error.issues[0]?.message ?? 'invalid',
       });
+    }
+  }
+
+  // Per-service storage credentials (API, Scanner, Promoter, Replicator)
+  const serviceNames = ['api', 'scanner', 'promoter', 'replicator'] as const;
+  const storageServices: Record<StorageServiceName, ServiceStorageConfig> = {
+    api: { accessKeyId: env.AWS_ACCESS_KEY_ID_API ?? awsAccessKeyId },
+    scanner: { accessKeyId: env.AWS_ACCESS_KEY_ID_SCANNER ?? awsAccessKeyId },
+    promoter: { accessKeyId: env.AWS_ACCESS_KEY_ID_PROMOTER ?? awsAccessKeyId },
+    replicator: { accessKeyId: env.AWS_ACCESS_KEY_ID_REPLICATOR ?? awsAccessKeyId },
+  };
+
+  const serviceStorageSecrets: Partial<Record<StorageServiceName, ServiceStorageSecret>> = {};
+  for (const svc of serviceNames) {
+    const secretFileName = `aws_secret_access_key_${svc}`;
+    const envVarName = `AWS_SECRET_ACCESS_KEY_${svc.toUpperCase()}`;
+    const svcSecRes = resolveSecret(secretFileName, [envVarName], secretsDir, env);
+    if (svcSecRes.error) {
+      issues.push({ key: envVarName, reason: svcSecRes.error });
+    } else if (svcSecRes.value) {
+      const valRes = awsSecretAccessKeySchema.safeParse(svcSecRes.value);
+      if (!valRes.success) {
+        issues.push({
+          key: envVarName,
+          reason: valRes.error.issues[0]?.message ?? 'invalid',
+        });
+      } else {
+        serviceStorageSecrets[svc] = { secretAccessKey: svcSecRes.value };
+      }
     }
   }
 
@@ -497,6 +639,7 @@ export function loadConfig(options: ConfigOptions = {}): Config {
         replicaBucket: gcsReplicaBucket,
         projectId: gcsProjectId,
       },
+      services: storageServices,
     },
     secrets: {
       pepper: pepper!,
@@ -505,6 +648,16 @@ export function loadConfig(options: ConfigOptions = {}): Config {
       checkpointPrivateKey: checkpointPrivateKey!,
       ...(dbPassword ? { dbPassword } : {}),
       ...(awsSecretAccessKey ? { awsSecretAccessKey } : {}),
+      ...(Object.keys(serviceStorageSecrets).length > 0
+        ? {
+            services: serviceStorageSecrets as {
+              api?: ServiceStorageSecret;
+              scanner?: ServiceStorageSecret;
+              promoter?: ServiceStorageSecret;
+              replicator?: ServiceStorageSecret;
+            },
+          }
+        : {}),
     },
   };
 

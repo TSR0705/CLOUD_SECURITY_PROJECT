@@ -8,6 +8,7 @@ import {
   loadConfig,
   redactConfig,
   resolveSecret,
+  getServiceStorageCredentials,
   ConfigurationError,
   type Config,
 } from '../../packages/shared/src/config.js';
@@ -385,6 +386,92 @@ describe('Configuration & Secret Loading (Phase P4)', () => {
       expect(res.source).toBe('env');
       expect(res.error).toBe('secret environment variable is empty');
       expect(res.value).toBeUndefined();
+    });
+  });
+
+  describe('Per-Service Storage Credentials', () => {
+    it('defaults per-service credentials to base storage credentials when not overridden', () => {
+      const env = {
+        ...getValidEnv(),
+        AWS_ACCESS_KEY_ID: 'global-key-id',
+        AWS_SECRET_ACCESS_KEY: 'global-secret-key',
+      };
+      const config = loadConfig({ env, secretsDir: path.join(tempDir, 'empty') });
+
+      const services = ['api', 'scanner', 'promoter', 'replicator'] as const;
+      for (const svc of services) {
+        expect(config.storage.services[svc].accessKeyId).toBe('global-key-id');
+        const creds = getServiceStorageCredentials(config, svc);
+        expect(creds.accessKeyId).toBe('global-key-id');
+        expect(creds.secretAccessKey).toBe('global-secret-key');
+      }
+    });
+
+    it('allows per-service credentials to be individually overridden via env vars', () => {
+      const env = {
+        ...getValidEnv(),
+        AWS_ACCESS_KEY_ID: 'global-key-id',
+        AWS_SECRET_ACCESS_KEY: 'global-secret-key',
+        AWS_ACCESS_KEY_ID_API: 'api-service-key-id',
+        AWS_SECRET_ACCESS_KEY_API: 'api-service-secret-key',
+      };
+      const config = loadConfig({ env, secretsDir: path.join(tempDir, 'empty') });
+
+      // API service has specific override
+      expect(config.storage.services.api.accessKeyId).toBe('api-service-key-id');
+      const apiCreds = getServiceStorageCredentials(config, 'api');
+      expect(apiCreds.accessKeyId).toBe('api-service-key-id');
+      expect(apiCreds.secretAccessKey).toBe('api-service-secret-key');
+
+      // Scanner service falls back to global credentials
+      expect(config.storage.services.scanner.accessKeyId).toBe('global-key-id');
+      const scannerCreds = getServiceStorageCredentials(config, 'scanner');
+      expect(scannerCreds.accessKeyId).toBe('global-key-id');
+      expect(scannerCreds.secretAccessKey).toBe('global-secret-key');
+    });
+
+    it('allows per-service storage secrets to be loaded from file secrets', () => {
+      populateValidSecretFiles(tempDir);
+      fs.writeFileSync(
+        path.join(tempDir, 'aws_secret_access_key_scanner'),
+        'scanner-file-secret-value\n',
+      );
+
+      const env: Record<string, string> = {
+        NODE_ENV: 'test',
+        DATABASE_URL: 'postgres://sug_admin:sug_test_password@localhost:5433/sug',
+      };
+
+      const config = loadConfig({ env, secretsDir: tempDir });
+      const scannerCreds = getServiceStorageCredentials(config, 'scanner');
+      expect(scannerCreds.secretAccessKey).toBe('scanner-file-secret-value');
+    });
+
+    it('strictly redacts per-service storage secrets in toRedacted, inspect, and toJSON', () => {
+      const secretApiValue = 'super-confidential-api-secret-value';
+      const env = {
+        ...getValidEnv(),
+        AWS_ACCESS_KEY_ID_API: 'api-service-key-id',
+        AWS_SECRET_ACCESS_KEY_API: secretApiValue,
+      };
+      const config = loadConfig({ env, secretsDir: path.join(tempDir, 'empty') });
+
+      // Direct secret is accessible on unredacted config
+      expect(config.secrets.services?.api?.secretAccessKey).toBe(secretApiValue);
+
+      // 1. toRedacted() replaces it with [REDACTED]
+      const redacted = config.toRedacted();
+      expect(redacted.secrets.services?.api?.secretAccessKey).toBe('[REDACTED]');
+
+      // 2. inspect() does not contain the secret
+      const inspected = inspect(config);
+      expect(inspected).not.toContain(secretApiValue);
+      expect(inspected).toContain('[REDACTED]');
+
+      // 3. toJSON() does not contain the secret
+      const serialized = JSON.stringify(config);
+      expect(serialized).not.toContain(secretApiValue);
+      expect(serialized).toContain('[REDACTED]');
     });
   });
 });

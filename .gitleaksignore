@@ -1,4 +1,11 @@
-# Gitleaks ignore file
-# Used to ignore known local development artifacts
+# ==============================================================================
+# Gitleaks Fingerprint Ignore Rules
+# ==============================================================================
+# POLICY:
+# 1. Broad glob patterns or path suppressions (e.g. *.ts, src/**) are STRICTLY PROHIBITED.
+# 2. Only exact, pinpointed fingerprints for local development dummy/template files are permitted.
+# 3. Source code, production configuration, and tests MUST NEVER be ignored.
+# ==============================================================================
 /path/.env:generic-api-key:2
 .env:generic-api-key:2
+

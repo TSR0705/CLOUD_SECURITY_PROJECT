@@ -12,31 +12,33 @@ The configuration contract is defined in [`packages/shared/src/config.ts`](file:
 
 ### Configuration Variables & Secrets Matrix
 
-| Parameter / Variable         | Type   | Secret? | Source (Primary / Fallback)                                              |                 Required?                  | Validation Rules                                                             |
-| :--------------------------- | :----- | :-----: | :----------------------------------------------------------------------- | :----------------------------------------: | :--------------------------------------------------------------------------- |
-| `NODE_ENV`                   | String |   No    | Env: `NODE_ENV`                                                          |     Optional (default: `development`)      | `'development' \| 'production' \| 'test'`                                    |
-| `LOG_LEVEL`                  | String |   No    | Env: `LOG_LEVEL`                                                         |         Optional (default: `info`)         | `'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'`               |
-| `PORT`                       | Number |   No    | Env: `PORT`                                                              |         Optional (default: `3000`)         | Integer between 1 and 65535                                                  |
-| `HOST`                       | String |   No    | Env: `HOST`                                                              |       Optional (default: `0.0.0.0`)        | Non-empty string                                                             |
-| `SERVICE_NAME`               | String |   No    | Env: `SERVICE_NAME`                                                      |       Optional (default: `sug-api`)        | Non-empty string                                                             |
-| `DATABASE_URL`               | URL    |   No*   | Env: `DATABASE_URL` or derived                                           |                  Required                  | Valid `postgres://` or `postgresql://` URI; password redacted in diagnostics |
-| `POSTGRES_HOST`              | String |   No    | Env: `POSTGRES_HOST`                                                     |      Optional (default: `127.0.0.1`)       | Hostname or IP address                                                       |
-| `POSTGRES_PORT`              | Number |   No    | Env: `POSTGRES_PORT`                                                     |     Optional (default: `5432`/`5433`)      | Valid port number                                                            |
-| `POSTGRES_USER`              | String |   No    | Env: `POSTGRES_USER`                                                     |      Optional (default: `sug_admin`)       | Non-empty string                                                             |
-| `POSTGRES_DB`                | String |   No    | Env: `POSTGRES_DB`                                                       |         Optional (default: `sug`)          | Non-empty string                                                             |
-| `S3_ENDPOINT`                | URL    |   No    | Env: `S3_ENDPOINT`                                                       |              Optional in prod              | Valid URL or undefined in prod                                               |
-| `AWS_REGION`                 | String |   No    | Env: `AWS_REGION`                                                        |      Optional (default: `us-east-1`)       | Non-empty string                                                             |
-| `S3_QUARANTINE_BUCKET`       | String |   No    | Env: `S3_QUARANTINE_BUCKET`                                              | Optional (default: `sug-quarantine-local`) | Non-empty string                                                             |
-| `S3_CLEAN_BUCKET`            | String |   No    | Env: `S3_CLEAN_BUCKET`                                                   |   Optional (default: `sug-clean-local`)    | Non-empty string                                                             |
-| `GCS_ENDPOINT`               | URL    |   No    | Env: `GCS_ENDPOINT`                                                      |              Optional in prod              | Valid URL or undefined in prod                                               |
-| `GCS_REPLICA_BUCKET`         | String |   No    | Env: `GCS_REPLICA_BUCKET`                                                |  Optional (default: `sug-replica-local`)   | Non-empty string                                                             |
-| `GCS_PROJECT_ID`             | String |   No    | Env: `GCS_PROJECT_ID`                                                    |  Optional (default: `sug-local-project`)   | Non-empty string                                                             |
-| **`PEPPER`**                 | Secret | **Yes** | `/run/secrets/pepper` $\to$ `SUG_PEPPER`                                 |                  **Yes**                   | String with $\ge 32$ characters ($\ge 256$ bits of entropy)                  |
-| **`KEK`**                    | Secret | **Yes** | `/run/secrets/kek` $\to$ `SUG_KEK`                                       |                  **Yes**                   | 256-bit key: 64 hex characters or 32-byte base64                             |
-| **`JWT_PRIVATE_KEY`**        | Secret | **Yes** | `/run/secrets/jwt_private_key` $\to$ `SUG_JWT_PRIVATE_KEY`               |                  **Yes**                   | PKCS#8 PEM Ed25519 private key or raw 32/64-byte key                         |
-| **`CHECKPOINT_PRIVATE_KEY`** | Secret | **Yes** | `/run/secrets/checkpoint_private_key` $\to$ `SUG_CHECKPOINT_PRIVATE_KEY` |                  **Yes**                   | PKCS#8 PEM Ed25519 private key or raw 32/64-byte key                         |
-| **`POSTGRES_PASSWORD`**      | Secret | **Yes** | `/run/secrets/db_password` $\to$ `POSTGRES_PASSWORD`                     |          **Yes** (unless in test)          | Non-empty string                                                             |
-| **`AWS_SECRET_ACCESS_KEY`**  | Secret | **Yes** | `/run/secrets/aws_secret_access_key` $\to$ `AWS_SECRET_ACCESS_KEY`       |           Optional in local dev            | Non-empty string ($\ge 4$ characters)                                        |
+| Parameter / Variable              | Type   | Secret? | Source (Primary / Fallback)                                                    |                 Required?                  | Validation Rules                                                                                   |
+| :-------------------------------- | :----- | :-----: | :----------------------------------------------------------------------------- | :----------------------------------------: | :------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                        | String |   No    | Env: `NODE_ENV`                                                                |     Optional (default: `development`)      | `'development' \| 'production' \| 'test'`                                                          |
+| `LOG_LEVEL`                       | String |   No    | Env: `LOG_LEVEL`                                                               |         Optional (default: `info`)         | `'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'`                                     |
+| `PORT`                            | Number |   No    | Env: `PORT`                                                                    |         Optional (default: `3000`)         | Integer between 1 and 65535                                                                        |
+| `HOST`                            | String |   No    | Env: `HOST`                                                                    |       Optional (default: `0.0.0.0`)        | Non-empty string                                                                                   |
+| `SERVICE_NAME`                    | String |   No    | Env: `SERVICE_NAME`                                                            |       Optional (default: `sug-api`)        | Non-empty string                                                                                   |
+| `DATABASE_URL`                    | URL    |   No*   | Env: `DATABASE_URL` or derived                                                 |                  Required                  | Valid `postgres://` or `postgresql://` URI; password redacted in diagnostics                       |
+| `POSTGRES_HOST`                   | String |   No    | Env: `POSTGRES_HOST`                                                           |      Optional (default: `127.0.0.1`)       | Hostname or IP address                                                                             |
+| `POSTGRES_PORT`                   | Number |   No    | Env: `POSTGRES_PORT`                                                           |     Optional (default: `5432`/`5433`)      | Valid port number                                                                                  |
+| `POSTGRES_USER`                   | String |   No    | Env: `POSTGRES_USER`                                                           |      Optional (default: `sug_admin`)       | Non-empty string                                                                                   |
+| `POSTGRES_DB`                     | String |   No    | Env: `POSTGRES_DB`                                                             |         Optional (default: `sug`)          | Non-empty string                                                                                   |
+| `S3_ENDPOINT`                     | URL    |   No    | Env: `S3_ENDPOINT`                                                             |              Optional in prod              | Valid URL or undefined in prod                                                                     |
+| `AWS_REGION`                      | String |   No    | Env: `AWS_REGION`                                                              |      Optional (default: `us-east-1`)       | Non-empty string                                                                                   |
+| `S3_QUARANTINE_BUCKET`            | String |   No    | Env: `S3_QUARANTINE_BUCKET`                                                    | Optional (default: `sug-quarantine-local`) | Non-empty string                                                                                   |
+| `S3_CLEAN_BUCKET`                 | String |   No    | Env: `S3_CLEAN_BUCKET`                                                         |   Optional (default: `sug-clean-local`)    | Non-empty string                                                                                   |
+| `GCS_ENDPOINT`                    | URL    |   No    | Env: `GCS_ENDPOINT`                                                            |              Optional in prod              | Valid URL or undefined in prod                                                                     |
+| `GCS_REPLICA_BUCKET`              | String |   No    | Env: `GCS_REPLICA_BUCKET`                                                      |  Optional (default: `sug-replica-local`)   | Non-empty string                                                                                   |
+| `GCS_PROJECT_ID`                  | String |   No    | Env: `GCS_PROJECT_ID`                                                          |  Optional (default: `sug-local-project`)   | Non-empty string                                                                                   |
+| **`PEPPER`**                      | Secret | **Yes** | `/run/secrets/pepper` $\to$ `SUG_PEPPER`                                       |                  **Yes**                   | Generated as 32 random bytes (64 hex characters = 256-bit entropy); schema enforces $\ge 32$ chars |
+| **`KEK`**                         | Secret | **Yes** | `/run/secrets/kek` $\to$ `SUG_KEK`                                             |                  **Yes**                   | 256-bit key: 64 hex characters or 32-byte base64                                                   |
+| **`JWT_PRIVATE_KEY`**             | Secret | **Yes** | `/run/secrets/jwt_private_key` $\to$ `SUG_JWT_PRIVATE_KEY`                     |                  **Yes**                   | PKCS#8 PEM Ed25519 private key or raw 32/64-byte key                                               |
+| **`CHECKPOINT_PRIVATE_KEY`**      | Secret | **Yes** | `/run/secrets/checkpoint_private_key` $\to$ `SUG_CHECKPOINT_PRIVATE_KEY`       |                  **Yes**                   | PKCS#8 PEM Ed25519 private key or raw 32/64-byte key                                               |
+| **`POSTGRES_PASSWORD`**           | Secret | **Yes** | `/run/secrets/db_password` $\to$ `POSTGRES_PASSWORD`                           |          **Yes** (unless in test)          | Non-empty string                                                                                   |
+| **`AWS_SECRET_ACCESS_KEY`**       | Secret | **Yes** | `/run/secrets/aws_secret_access_key` $\to$ `AWS_SECRET_ACCESS_KEY`             |           Optional in local dev            | Non-empty string ($\ge 4$ characters); global fallback                                             |
+| `AWS_ACCESS_KEY_ID_<SVC>`         | String |   No    | Env: `AWS_ACCESS_KEY_ID_<SVC>`                                                 |             Optional override              | Per-service S3 Access Key ID (`API`, `SCANNER`, `PROMOTER`, `REPLICATOR`)                          |
+| **`AWS_SECRET_ACCESS_KEY_<SVC>`** | Secret | **Yes** | `/run/secrets/aws_secret_access_key_<svc>` $\to$ `AWS_SECRET_ACCESS_KEY_<SVC>` |             Optional override              | Per-service S3 Secret Access Key; falls back to global key                                         |
 
 ---
 
@@ -67,6 +69,23 @@ The secret resolver `resolveSecret(...)` enforces strict multi-source resolution
 - An environment variable **CANNOT** override an existing Docker file secret. If `/run/secrets/pepper` exists, its value is used regardless of what is set in `SUG_PEPPER` or `PEPPER`.
 - Empty secrets (files containing only whitespace or empty environment variables) are explicitly detected and cause immediate startup abort with `secret file is empty` or `secret environment variable is empty`.
 
+### Per-Service Storage Credential Slots (Least Privilege)
+
+To enforce isolation between architectural trust zones (ADR 0001 / ADR 0010), `config.storage.services` and `config.secrets.services` provide distinct credential slots:
+
+- `api`: Ingestion service (writes to quarantine bucket).
+- `scanner`: Analysis engines (read-only on quarantine bucket).
+- `promoter`: File promotion engine (reads quarantine, writes to clean).
+- `replicator`: Cloud replication engine (reads clean, writes to GCS replica).
+
+Each service resolves credentials through:
+
+1. Container file secret: `/run/secrets/aws_secret_access_key_<svc>`
+2. Environment variables: `AWS_ACCESS_KEY_ID_<SVC>` and `AWS_SECRET_ACCESS_KEY_<SVC>`
+3. Global storage credentials fallback: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+
+The helper function `getServiceStorageCredentials(config, serviceName)` resolves the effective credentials for any given service.
+
 ---
 
 ## 4. Redaction & Zero-Leak Diagnostics
@@ -74,7 +93,7 @@ The secret resolver `resolveSecret(...)` enforces strict multi-source resolution
 To prevent sensitive material from leaking into monitoring, application logs, bug tracking tools, or core dumps:
 
 1. **`redactConfig(config)`**:
-   - Returns a cloned configuration where all fields in `config.secrets` are replaced with `'[REDACTED]'`.
+   - Returns a cloned configuration where all fields in `config.secrets` (including base secrets and any per-service `secrets.services.<svc>.secretAccessKey`) are replaced with `'[REDACTED]'`.
    - Strips the password from `database.url` (e.g. `postgres://sug_admin:[REDACTED]@localhost:5433/sug`).
 2. **`config.toRedacted()`**:
    - Instance method returning the sanitized configuration view.
@@ -137,6 +156,10 @@ The repository enforces strict exclusion of secret material:
   ```bash
   docker run --rm -v "${PWD}:/path" zricethezav/gitleaks:latest detect --source="/path" -v
   ```
+- **`.gitleaksignore` Policy**:
+  - Broad glob patterns (`*.ts`, `src/**`) or directory-level suppressions are **strictly prohibited**.
+  - Entries are restricted exclusively to pinpointed line/rule fingerprints in local development template files (`.env`).
+  - Source code, production configuration, and tests must never be exempted from secret scanning.
 - [`.env.example`](file:///c:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT/.env.example) contains only placeholders and documentation, with zero real secret values.
 
 ---
