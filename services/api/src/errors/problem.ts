@@ -18,6 +18,8 @@ export interface ProblemDetails {
  */
 export const ErrorTypes = {
   VALIDATION: 'urn:sug:error:validation',
+  UNAUTHORIZED: 'urn:sug:error:unauthorized',
+  FORBIDDEN: 'urn:sug:error:forbidden',
   NOT_FOUND: 'urn:sug:error:not-found',
   METHOD_NOT_ALLOWED: 'urn:sug:error:method-not-allowed',
   RATE_LIMIT: 'urn:sug:error:rate-limit',
@@ -86,6 +88,14 @@ export function handleProblemError(
     type = ErrorTypes.VALIDATION;
     title = 'Validation Error';
     detail = sanitizeErrorMessage(error.message, 400);
+  } else if (status === 401) {
+    type = ErrorTypes.UNAUTHORIZED;
+    title = 'Unauthorized';
+    detail = sanitizeErrorMessage(error.message, 401) || 'Authentication failed';
+  } else if (status === 403) {
+    type = ErrorTypes.FORBIDDEN;
+    title = 'Forbidden';
+    detail = sanitizeErrorMessage(error.message, 403) || 'Access forbidden';
   } else if (status === 404) {
     type = ErrorTypes.NOT_FOUND;
     title = 'Not Found';

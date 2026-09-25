@@ -22,3 +22,8 @@ export * from './health/types.js';
 export * from './health/database.js';
 export * from './health/storage.js';
 export * from './routes/health.js';
+export * from './auth/types.js';
+export * from './auth/keys.js';
+export * from './auth/service.js';
+export * from './auth/middleware.js';
+export * from './routes/auth.js';

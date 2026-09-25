@@ -18,6 +18,9 @@ async function main() {
   const mockStorage = {
     checkReachability: async () => {},
   };
+  const mockAuthDb = {
+    query: async () => ({ rows: [] }),
+  };
   const mockConfig = {
     nodeEnv: 'test',
     logLevel: 'info',
@@ -65,6 +68,7 @@ async function main() {
     config: mockConfig,
     db: mockDb,
     storage: mockStorage,
+    authDb: mockAuthDb,
     logger: false,
   });
 

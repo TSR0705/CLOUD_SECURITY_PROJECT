@@ -10,11 +10,17 @@ import { type ReadinessDatabase, type ReadinessStorage } from './health/types.js
 import { PostgresReadinessCheck } from './health/database.js';
 import { S3ReadinessCheck } from './health/storage.js';
 import { healthRoutes } from './routes/health.js';
+import { ApiKeyService } from './auth/service.js';
+import type { ApiKeyDatabase } from './auth/types.js';
+import { authRoutes } from './routes/auth.js';
+import pg from 'pg';
 
 export interface AppOptions {
   config?: Config | undefined;
   db?: ReadinessDatabase | undefined;
   storage?: ReadinessStorage | undefined;
+  apiKeyService?: ApiKeyService | undefined;
+  authDb?: ApiKeyDatabase | undefined;
   logger?: boolean | object | undefined;
   rateLimitMax?: number | undefined;
   rateLimitTimeWindow?: string | number | undefined;
@@ -52,8 +58,21 @@ export function resolveRequestId(suppliedId?: string | string[]): string {
 export async function createApp(options: AppOptions = {}): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig();
 
+  // Configure logger with strict redaction of credentials and Authorization headers
+  let loggerConfig: boolean | object = false;
+  if (options.logger === true) {
+    loggerConfig = {
+      redact: ['req.headers.authorization', 'headers.authorization'],
+    };
+  } else if (typeof options.logger === 'object' && options.logger !== null) {
+    loggerConfig = {
+      ...options.logger,
+      redact: ['req.headers.authorization', 'headers.authorization'],
+    };
+  }
+
   const app: FastifyInstance = Fastify({
-    logger: options.logger ?? false,
+    logger: loggerConfig,
     requestIdHeader: false,
     genReqId: (req) => {
       const incomingId = req.headers['x-request-id'];
@@ -130,6 +149,14 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
             schema: { type: 'string', example: 'c0a80101-0000-0000-0000-000000000000' },
           },
         },
+        securitySchemes: {
+          ApiKeyAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'API Key',
+            description: 'API key in format sug_<key_prefix>_<secret>',
+          },
+        },
       },
     },
   });
@@ -155,6 +182,24 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
 
   await app.register(healthRoutes, { db, storage });
 
+  // 7. API Key Authentication Service & Protected Routes
+  let authPool: pg.Pool | undefined;
+  let apiKeyService = options.apiKeyService;
+  if (!apiKeyService) {
+    const authDb =
+      options.authDb ??
+      (() => {
+        authPool = new pg.Pool({ connectionString: config.database.url });
+        return authPool;
+      })();
+    apiKeyService = new ApiKeyService({
+      db: authDb,
+      pepper: config.secrets.pepper,
+    });
+  }
+
+  await app.register(authRoutes, { apiKeyService });
+
   // Clean shutdown hook
   app.addHook('onClose', async () => {
     if (db.close) {
@@ -162,6 +207,9 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     }
     if (storage.close) {
       await storage.close();
+    }
+    if (authPool) {
+      await authPool.end();
     }
   });
 
