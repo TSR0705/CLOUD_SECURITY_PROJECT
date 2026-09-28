@@ -23,6 +23,7 @@ export default defineConfig({
     globals: true,
     clearMocks: true,
     environment: 'node',
+    fileParallelism: false,
     include: ['tests/**/*.test.ts', 'packages/**/*.test.ts', 'services/**/*.test.ts'],
   },
 });
