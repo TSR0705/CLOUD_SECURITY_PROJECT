@@ -15,6 +15,9 @@ import type { ApiKeyDatabase } from './auth/types.js';
 import { authRoutes } from './routes/auth.js';
 import { UploadAuthorizationService } from './auth/session-service.js';
 import { uploadAuthRoutes } from './routes/upload-auth.js';
+import fastifyCookie from '@fastify/cookie';
+import { UserService } from './auth/user-service.js';
+import { userAuthRoutes } from './routes/user-auth.js';
 import pg from 'pg';
 
 export interface AppOptions {
@@ -23,6 +26,7 @@ export interface AppOptions {
   storage?: ReadinessStorage | undefined;
   apiKeyService?: ApiKeyService | undefined;
   uploadAuthService?: UploadAuthorizationService | undefined;
+  userService?: UserService | undefined;
   authDb?: ApiKeyDatabase | undefined;
   logger?: boolean | object | undefined;
   rateLimitMax?: number | undefined;
@@ -115,7 +119,10 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     },
   });
 
-  // 4. OpenAPI / Swagger Documentation
+  // 4. Cookie Support for Secure Refresh Tokens
+  await app.register(fastifyCookie);
+
+  // 5. OpenAPI / Swagger Documentation
   await app.register(swagger, {
     openapi: {
       openapi: '3.0.3',
@@ -158,6 +165,12 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
             scheme: 'bearer',
             bearerFormat: 'API Key',
             description: 'API key in format sug_<key_prefix>_<secret>',
+          },
+          UserAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+            description: 'EdDSA JWT access token issued by POST /api/v1/auth/login',
           },
         },
       },
@@ -211,6 +224,19 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     });
 
   await app.register(uploadAuthRoutes, { apiKeyService, uploadAuthService });
+
+  // 9. Dashboard User Authentication & RBAC Routes
+  const userService =
+    options.userService ??
+    new UserService({
+      db: authDb,
+    });
+
+  await app.register(userAuthRoutes, {
+    userService,
+    jwtPrivateKeyPem: config.secrets.jwtPrivateKey,
+    isProduction: config.nodeEnv === 'production',
+  });
 
   // Clean shutdown hook
   app.addHook('onClose', async () => {
