@@ -53,8 +53,6 @@ CREATE POLICY cloud_objects_replicator_insert_policy ON cloud_objects
     WITH CHECK (zone = 'replica');
 
 -- sug_api grants
-GRANT SELECT, UPDATE (failed_logins, locked_until, last_login_at) ON users TO sug_api;
-GRANT SELECT, INSERT, UPDATE ON refresh_tokens TO sug_api;
 GRANT SELECT, INSERT, UPDATE ON upload_sessions, files TO sug_api;
 GRANT INSERT ON file_versions, scan_jobs TO sug_api;
 GRANT SELECT ON security_policies, api_keys, security_decisions, scan_results, cloud_objects TO sug_api;

@@ -418,6 +418,90 @@ describe('Integration — Dashboard Users, JWT and RBAC (Phase P7)', () => {
       expect(newRow.rows[0].replaced_by).toBeNull();
     });
 
+    it('handles concurrent refresh requests for the same token: exactly 1 succeeds and 1 fails', async () => {
+      // 1. Initial login to get a fresh refresh token
+      const loginRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { email: analystUser.email, password: analystUser.password },
+      });
+      expect(loginRes.statusCode).toBe(200);
+      const targetCookie = extractCookie(loginRes.headers['set-cookie'], REFRESH_COOKIE_NAME)!;
+      expect(targetCookie).toBeTruthy();
+
+      // 2. Launch two concurrent refresh requests simultaneously targeting the exact same token
+      const [resA, resB] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/auth/refresh',
+          headers: {
+            cookie: `${REFRESH_COOKIE_NAME}=${targetCookie}`,
+            'x-request-id': crypto.randomUUID(),
+          },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/api/v1/auth/refresh',
+          headers: {
+            cookie: `${REFRESH_COOKIE_NAME}=${targetCookie}`,
+            'x-request-id': crypto.randomUUID(),
+          },
+        }),
+      ]);
+
+      const statusCodes = [resA.statusCode, resB.statusCode];
+      expect(statusCodes).toContain(200);
+      expect(statusCodes).toContain(401);
+
+      const successRes = resA.statusCode === 200 ? resA : resB;
+      const failedRes = resA.statusCode === 401 ? resA : resB;
+
+      // Verify the successful response
+      const successBody = JSON.parse(successRes.body);
+      expect(successBody.tokenType).toBe('Bearer');
+      expect(typeof successBody.accessToken).toBe('string');
+      const newCookie = extractCookie(successRes.headers['set-cookie'], REFRESH_COOKIE_NAME);
+      expect(newCookie).toBeTruthy();
+      expect(newCookie).not.toBe(targetCookie);
+
+      // Verify the rejected response
+      const failedBody = JSON.parse(failedRes.body);
+      expect(failedBody.status).toBe(401);
+      expect(failedBody.detail).toContain('reuse detected');
+
+      // 3. Database verification afterward: original token revoked with replaced_by set
+      const targetHash = crypto.createHash('sha256').update(targetCookie).digest();
+      const origRow = await adminPool.query(
+        'SELECT id, revoked_at, replaced_by FROM refresh_tokens WHERE token_hash = $1',
+        [targetHash],
+      );
+      expect(origRow.rowCount).toBe(1);
+      expect(origRow.rows[0].revoked_at).not.toBeNull();
+      expect(origRow.rows[0].replaced_by).toBeTruthy();
+
+      // 4. Test replay behavior: attempting to use the old token again MUST fail
+      const replayRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/refresh',
+        headers: {
+          cookie: `${REFRESH_COOKIE_NAME}=${targetCookie}`,
+          'x-request-id': crypto.randomUUID(),
+        },
+      });
+      expect(replayRes.statusCode).toBe(401);
+      const replayBody = JSON.parse(replayRes.body);
+      expect(replayBody.detail).toContain('reuse detected');
+
+      // Verify replay detection audit event
+      const auditRes = await adminPool.query(
+        `SELECT action, actor_id, details
+         FROM audit_events
+         WHERE action = 'user.token_replay_detected' AND actor_id = $1`,
+        [analystUser.id],
+      );
+      expect(auditRes.rowCount).toBeGreaterThanOrEqual(1);
+    });
+
     it('detects token theft / replay and immediately revokes all user sessions', async () => {
       // 1. Initial login
       const loginRes = await app.inject({

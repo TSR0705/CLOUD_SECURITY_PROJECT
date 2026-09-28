@@ -209,7 +209,8 @@ export class UserService {
   }
 
   /**
-   * Rotates a refresh token with automatic reuse detection (theft mitigation).
+   * Rotates a refresh token with atomic transaction locking and automatic reuse detection.
+   * Concurrency-safe against race conditions and double-rotation attacks.
    */
   async rotateRefreshToken(rawToken: string, requestId?: string): Promise<RotateResult> {
     if (!rawToken || typeof rawToken !== 'string') {
@@ -218,93 +219,135 @@ export class UserService {
 
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest();
 
-    const res = await this.db.query<RefreshTokenRecord>(
-      `SELECT id, user_id, token_hash, expires_at, revoked_at, replaced_by
-       FROM refresh_tokens WHERE token_hash = $1`,
-      [tokenHash],
-    );
+    // Acquire dedicated connection for transaction if pool is available
+    const dbWithConnect = this.db as {
+      connect?: () => Promise<{
+        query<T = unknown>(
+          sql: string,
+          params?: unknown[],
+        ): Promise<{ rows: T[]; rowCount?: number | null }>;
+        release: () => void;
+      }>;
+    };
+    const client =
+      typeof dbWithConnect.connect === 'function' ? await dbWithConnect.connect() : null;
+    const runner = client ?? this.db;
 
-    const token = res.rows[0];
-    if (!token) {
-      return { success: false, reason: 'INVALID_REFRESH_TOKEN' };
-    }
+    try {
+      if (client) {
+        await client.query('BEGIN');
+      }
 
-    // Reuse detection: token already revoked or replaced!
-    if (token.revoked_at !== null || token.replaced_by !== null) {
-      // Invalidate ALL active refresh tokens for this user family (token theft defense)
-      await this.db.query(
-        `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+      // 1. Lock the token row exclusively with SELECT ... FOR UPDATE to eliminate concurrent double-rotation
+      const res = await runner.query<RefreshTokenRecord>(
+        `SELECT id, user_id, token_hash, expires_at, revoked_at, replaced_by
+         FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE`,
+        [tokenHash],
+      );
+
+      const token = res.rows[0];
+      if (!token) {
+        if (client) await client.query('ROLLBACK');
+        return { success: false, reason: 'INVALID_REFRESH_TOKEN' };
+      }
+
+      // 2. Reuse detection: token already revoked or replaced!
+      if (token.revoked_at !== null || token.replaced_by !== null) {
+        // Invalidate ALL active refresh tokens for this user family (token theft defense)
+        await runner.query(
+          `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+          [token.user_id],
+        );
+        if (client) await client.query('COMMIT');
+
+        await this.safeAuditAppend(
+          'user',
+          token.user_id,
+          'user.token_replay_detected',
+          { request_id: requestId },
+          { compromised_token_id: token.id },
+        );
+
+        return { success: false, reuseDetected: true, reason: 'TOKEN_REUSE_DETECTED' };
+      }
+
+      // 3. Check expiration
+      if (new Date(token.expires_at).getTime() < Date.now()) {
+        if (client) await client.query('ROLLBACK');
+        return { success: false, reason: 'TOKEN_EXPIRED' };
+      }
+
+      // 4. Check user active status
+      const userRes = await runner.query<UserRecord>(
+        `SELECT id, email, role, is_active, locked_until FROM users WHERE id = $1`,
         [token.user_id],
       );
+      const user = userRes.rows[0];
+
+      if (
+        !user ||
+        !user.is_active ||
+        (user.locked_until && new Date(user.locked_until).getTime() > Date.now())
+      ) {
+        if (client) await client.query('ROLLBACK');
+        return { success: false, reason: 'USER_INACTIVE' };
+      }
+
+      // 5. Atomically rotate: create new token and mark previous token replaced
+      const newRawToken = crypto.randomBytes(32).toString('base64url');
+      const newTokenHash = crypto.createHash('sha256').update(newRawToken).digest();
+      const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      const insertRes = await runner.query<{ id: string }>(
+        `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [token.user_id, newTokenHash, newExpiresAt],
+      );
+      const newId = insertRes.rows[0]?.id;
+
+      await runner.query(
+        `UPDATE refresh_tokens SET replaced_by = $1, revoked_at = now() WHERE id = $2`,
+        [newId, token.id],
+      );
+
+      if (client) {
+        await client.query('COMMIT');
+      }
+
+      const safeUser: SafeUser = {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      };
 
       await this.safeAuditAppend(
         'user',
-        token.user_id,
-        'user.token_replay_detected',
+        user.id,
+        'user.token_refreshed',
         { request_id: requestId },
-        { compromised_token_id: token.id },
+        { old_token_id: token.id, new_token_id: newId },
       );
 
-      return { success: false, reuseDetected: true, reason: 'TOKEN_REUSE_DETECTED' };
+      return {
+        success: true,
+        user: safeUser,
+        newRawToken,
+      };
+    } catch (err) {
+      if (client) {
+        try {
+          await client.query('ROLLBACK');
+        } catch {
+          // ignore rollback failure
+        }
+      }
+      throw err;
+    } finally {
+      if (client) {
+        client.release();
+      }
     }
-
-    // Check expiration
-    if (new Date(token.expires_at).getTime() < Date.now()) {
-      return { success: false, reason: 'TOKEN_EXPIRED' };
-    }
-
-    // Check user active status
-    const userRes = await this.db.query<UserRecord>(
-      `SELECT id, email, role, is_active, locked_until FROM users WHERE id = $1`,
-      [token.user_id],
-    );
-    const user = userRes.rows[0];
-
-    if (
-      !user ||
-      !user.is_active ||
-      (user.locked_until && new Date(user.locked_until).getTime() > Date.now())
-    ) {
-      return { success: false, reason: 'USER_INACTIVE' };
-    }
-
-    // Atomically rotate: create new token and mark previous token replaced
-    const newRawToken = crypto.randomBytes(32).toString('base64url');
-    const newTokenHash = crypto.createHash('sha256').update(newRawToken).digest();
-    const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    const insertRes = await this.db.query<{ id: string }>(
-      `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
-       VALUES ($1, $2, $3)
-       RETURNING id`,
-      [token.user_id, newTokenHash, newExpiresAt],
-    );
-    const newId = insertRes.rows[0]?.id;
-
-    await this.db.query(
-      `UPDATE refresh_tokens SET replaced_by = $1, revoked_at = now() WHERE id = $2`,
-      [newId, token.id],
-    );
-
-    const safeUser: SafeUser = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-    };
-
-    await this.safeAuditAppend(
-      'user',
-      user.id,
-      'user.token_refreshed',
-      { request_id: requestId },
-      { old_token_id: token.id, new_token_id: newId },
-    );
-
-    return {
-      success: true,
-      user: safeUser,
-      newRawToken,
-    };
   }
 
   /**

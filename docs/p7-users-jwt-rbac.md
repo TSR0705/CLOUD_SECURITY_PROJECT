@@ -30,10 +30,10 @@ It establishes:
 
 - **Signature Algorithm**: `EdDSA` over curve `Ed25519`
 - **Lifespan**: 15 minutes ($900\text{ seconds}$)
-- **Header**:
-  - `alg`: `EdDSA`
-  - `typ`: `JWT`
-- **Claims**:
+- **JOSE Protected Header**:
+  - `alg`: `"EdDSA"` (Edwards-curve Digital Signature Algorithm)
+  - `typ`: `"JWT"` (JOSE header parameter per RFC 7519 / RFC 8725, not a payload claim)
+- **JWT Payload (Claims)**:
   - `iss`: `"sug-api"` (fixed issuer)
   - `aud`: `"sug-dashboard"` (fixed audience)
   - `sub`: User UUID (`users.id`)
@@ -92,10 +92,11 @@ Centralized authorization is enforced via the `requireRole(...roles)` pre-handle
 
 ## 5. Database Schema & Least-Privilege Grants
 
-The implementation utilizes the pre-existing `users` and `refresh_tokens` tables established in `migrations/003_identity_policy.sql`. In accordance with the least-privilege principle, `migrations/009_roles_grants.sql` was updated to grant the runtime `sug_api` role only what is strictly required:
+The implementation utilizes the pre-existing `users` and `refresh_tokens` tables established in `migrations/003_identity_policy.sql`. In accordance with migration immutability, `migrations/009_roles_grants.sql` remains intact as frozen in P3. A dedicated migration [`migrations/010_p7_dashboard_auth_grants.sql`](file:///c:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT/migrations/010_p7_dashboard_auth_grants.sql) provisions the runtime `sug_api` role with least-privilege permissions:
 
 ```sql
-GRANT SELECT, UPDATE (failed_logins, locked_until, last_login_at) ON users TO sug_api;
+GRANT SELECT ON users TO sug_api;
+GRANT UPDATE (failed_logins, locked_until, last_login_at) ON users TO sug_api;
 GRANT SELECT, INSERT, UPDATE ON refresh_tokens TO sug_api;
 ```
 
