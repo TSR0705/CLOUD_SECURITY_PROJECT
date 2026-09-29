@@ -31,15 +31,17 @@ import {
 } from './errors.js';
 
 export interface S3ProviderOptions {
-  endpoint?: string;
-  region?: string;
-  credentials?: {
-    accessKeyId: string;
-    secretAccessKey: string;
-    sessionToken?: string;
-  };
-  forcePathStyle?: boolean;
-  s3Client?: S3Client;
+  endpoint?: string | undefined;
+  region?: string | undefined;
+  credentials?:
+    | {
+        accessKeyId: string;
+        secretAccessKey: string;
+        sessionToken?: string | undefined;
+      }
+    | undefined;
+  forcePathStyle?: boolean | undefined;
+  s3Client?: S3Client | undefined;
 }
 
 export class S3Provider implements StorageProvider {
@@ -51,6 +53,7 @@ export class S3Provider implements StorageProvider {
     } else {
       const config: S3ClientConfig = {
         region: options.region || 'us-east-1',
+        requestChecksumCalculation: 'WHEN_REQUIRED',
         ...(options.endpoint ? { endpoint: options.endpoint } : {}),
         ...(options.credentials
           ? {
@@ -109,12 +112,18 @@ export class S3Provider implements StorageProvider {
     }
 
     type NonNullableBody = NonNullable<PutObjectCommandInput['Body']>;
+    const isStream =
+      typeof (params.body as { pipe?: unknown })?.pipe === 'function' ||
+      typeof (params.body as { getReader?: unknown })?.getReader === 'function';
+
     const input: PutObjectCommandInput = {
       Bucket: params.bucket,
       Key: params.key,
       Body: params.body as NonNullableBody,
       IfNoneMatch: '*',
-      ChecksumAlgorithm: 'SHA256',
+      ...(!isStream || params.contentLength !== undefined
+        ? { ChecksumAlgorithm: 'SHA256' as const }
+        : {}),
       ...(checksumBase64 ? { ChecksumSHA256: checksumBase64 } : {}),
       ...(params.contentType ? { ContentType: params.contentType } : {}),
       ...(params.contentLength !== undefined ? { ContentLength: params.contentLength } : {}),
@@ -122,7 +131,10 @@ export class S3Provider implements StorageProvider {
     };
 
     try {
-      const res = await this.client.send(new PutObjectCommand(input));
+      const res = await this.client.send(
+        new PutObjectCommand(input),
+        params.abortSignal ? { abortSignal: params.abortSignal } : undefined,
+      );
 
       const versionId = res.VersionId;
       if (!versionId || typeof versionId !== 'string' || versionId.trim() === '') {
@@ -160,6 +172,9 @@ export class S3Provider implements StorageProvider {
         size,
       };
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw err;
+      }
       throw this.normalizeError(err, params.bucket, params.key);
     }
   }
