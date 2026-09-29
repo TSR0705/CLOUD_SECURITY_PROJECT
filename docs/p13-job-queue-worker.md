@@ -22,7 +22,7 @@ Phase P13 establishes the asynchronous execution and job processing infrastructu
    - Content digest and byte size are computed continuously during the read pass and validated against the authoritative ingest metadata using `timingSafeSha256Equal`.
    - Fails closed on any mismatch, recording an immutable audit finding and marking the job `DEAD`.
 6. **Strict Monorepo Quality Gates**:
-   - 100% clean test suite: 40 test files, 530 passing tests (20 dedicated P13 tests covering concurrency, locking, dead-lettering, and identity verification).
+   - 100% clean test suite: 40 test files, 542 passing tests (32 dedicated P13 tests covering concurrency, locking, dead-lettering, timing bounds, and identity verification).
    - TypeScript build (`tsc -b`), linting (`eslint .`), formatting (`prettier`), OpenAPI validation (`openapi:check`), and secret scanning (`gitleaks`) all pass with zero errors.
 
 ---
@@ -244,6 +244,14 @@ The canonical P13 DoD requires that a killed worker's job is detected and re-que
 - **Worst-Case Recovery Bound**:
   $$\text{Worst-Case Recovery Bound} = \text{lease duration} + \text{maximum reaper detection interval} = 240\text{s} + 30\text{s} = \mathbf{270\text{ seconds}} \le 300\text{ seconds}$$
 - **Safety Margin**: A 30-second deterministic buffer guarantees that even in the absolute worst-case timing alignment (where a worker crashes 1 millisecond after a reaper sweep begins), the subsequent sweep detects and re-queues the job at second 270, strictly honoring the canonical 5-minute ($300\text{s}$) SLA.
+- **Code Enforcement & Validation**:
+  - `MAX_REAPER_INTERVAL_MS = 30_000` is defined as a non-negotiable architectural constant.
+  - `validateReaperInterval(intervalMs)` in `@sug/shared` validates that `intervalMs` is a positive integer and rejects any value $> 30,000\text{ ms}`.
+  - `validateRecoveryBound(leaseTimeoutMs, reaperIntervalMs)` enforces that `leaseTimeoutMs + reaperIntervalMs <= 300_000\text{ ms}`.
+  - `ScannerWorker` constructor invokes `validateRecoveryBound` at startup, failing fast and throwing an error if configured with invalid or out-of-bound intervals.
+- **Honest Runtime Qualification**:
+  - JavaScript event loop timers (`setTimeout`, `setInterval`) are cooperative userland constructs.
+  - The 270-second upper bound represents an architectural and contractual bound under normal scheduler execution, rather than a hard real-time operating system guarantee under arbitrary CPU starvation.
 
 #### Test Suite Configuration (`tests/integration/scanner/p13-concurrency.test.ts` — `P13-07 & P13-08`)
 
@@ -355,48 +363,61 @@ All 20 dedicated P13 tests across 3 suites pass with 100% reliability:
 
 ### Unit Tests Suite (`tests/unit/shared/jobs.test.ts`)
 
-| Test ID       | Description                                                                 | Result   |
-| ------------- | --------------------------------------------------------------------------- | -------- |
-| `P13-UNIT-01` | generateWorkerId returns valid worker ID containing host and random entropy | **PASS** |
-| `P13-UNIT-02` | calculateBackoff returns exponential values for attempts 1 through 5        | **PASS** |
-| `P13-UNIT-03` | calculateBackoff caps at maxBackoffMs ceiling                               | **PASS** |
-| `P13-UNIT-04` | calculateBackoff handles zero or negative attempts gracefully               | **PASS** |
-| `P13-UNIT-05` | calculateBackoff handles custom base and max values                         | **PASS** |
+| Test ID       | Description                                                                                 | Result   |
+| ------------- | ------------------------------------------------------------------------------------------- | -------- |
+| `P13-UNIT-01` | calculateBackoff returns 0 for attempt 0 or negative                                        | **PASS** |
+| `P13-UNIT-02` | calculateBackoff returns exponential values for attempts 1 through 5 and caps at maxBackoff | **PASS** |
+| `P13-UNIT-03` | calculateBackoff handles custom base and max values                                         | **PASS** |
+| `P13-UNIT-04` | generateWorkerId returns valid worker ID containing host and random entropy                 | **PASS** |
+| `P13-UNIT-05` | generateWorkerId supports custom prefix                                                     | **PASS** |
+| `P13-UNIT-06` | Canonical P13 timing bounds constants defined exactly (240s lease, 30s reaper, 300s SLA)    | **PASS** |
+| `P13-UNIT-07` | Mathematical recovery bound satisfied: 240s + 30s = 270s <= 300s with 30s margin            | **PASS** |
+| `P13-UNIT-08` | validateReaperInterval accepts valid intervals <= 30_000ms                                  | **PASS** |
+| `P13-UNIT-09` | validateReaperInterval rejects intervals exceeding 30_000ms (e.g. 30_001ms, 60_000ms)       | **PASS** |
+| `P13-UNIT-10` | validateReaperInterval rejects non-positive, NaN, or non-integer intervals                  | **PASS** |
+| `P13-UNIT-11` | validateRecoveryBound accepts valid configurations satisfying 300s SLA                      | **PASS** |
+| `P13-UNIT-12` | validateRecoveryBound rejects lease + reaper exceeding 300s SLA (e.g. 280s + 30s = 310s)    | **PASS** |
+| `P13-UNIT-13` | validateRecoveryBound rejects non-positive or non-integer lease timeouts                    | **PASS** |
+| `P13-UNIT-14` | ScannerWorker instantiates with default settings (240s lease, 30s reaper)                   | **PASS** |
+| `P13-UNIT-15` | ScannerWorker instantiates with valid custom parameters                                     | **PASS** |
+| `P13-UNIT-16` | ScannerWorker rejects reaperIntervalMs exceeding 30_000ms                                   | **PASS** |
+| `P13-UNIT-17` | ScannerWorker rejects configuration violating canonical 300s recovery SLA                   | **PASS** |
 
 ---
 
 ## 10. Required Final Evidence Table
 
-| Requirement              | Evidence                                                                       |  Result  |
-| ------------------------ | ------------------------------------------------------------------------------ | :------: |
-| `claim()`                | `packages/shared/src/jobs.ts` (`claimScanJob`)                                 | **PASS** |
-| `FOR UPDATE SKIP LOCKED` | `packages/shared/src/jobs.ts` CTE claim query                                  | **PASS** |
-| Atomic claim             | `tests/integration/scanner/p13-concurrency.test.ts` (`P13-01`, `P13-02`)       | **PASS** |
-| 50 jobs / 4 workers      | 50 unique claims across 4 concurrent workers (`P13-01`)                        | **PASS** |
-| Zero duplicate claims    | `expect(claims.length).toBe(50)` with unique IDs (`P13-01`)                    | **PASS** |
-| Retry/backoff            | `tests/unit/shared/jobs.test.ts` & `p13-concurrency.test.ts` (`P13-05`)        | **PASS** |
-| Reaper                   | `packages/shared/src/jobs.ts` (`reapExpiredJobs`)                              | **PASS** |
-| Worker crash recovery    | `tests/integration/scanner/p13-concurrency.test.ts` (`P13-07 & P13-08`)        | **PASS** |
-| Actual requeue latency   | **258 ms** measured latency ($T_4 - T_2$)                                      | **PASS** |
-| Requeue <= 5 minutes     | $258\text{ ms} < 300,000\text{ ms}$ (measured comparison)                      | **PASS** |
-| max_attempts             | Job marked `DEAD` after attempt counter reaches limit (`P13-06`)               | **PASS** |
-| DEAD                     | Status transitions and timestamp recorded (`P13-06`)                           | **PASS** |
-| DEAD cannot be claimed   | `claimScanJob` returns `null` for `DEAD` jobs (`P13-10`)                       | **PASS** |
-| Exact VersionId          | `services/scanner/src/worker.ts` & `p13-worker-identity.test.ts` (`P13-ID-02`) | **PASS** |
-| SHA-256 verification     | Real-time hash comparison via `timingSafeSha256Equal` (`P13-ID-01`)            | **PASS** |
-| Size verification        | Stream byte count comparison (`P13-ID-01`, `P13-ID-04`)                        | **PASS** |
-| Placeholder finding      | Canonical finding in `scan_results` with `scanned_*` fields (`P13-ID-01`)      | **PASS** |
-| tmpfs                    | Directory `$TMPFS_DIR/<job-id>/` isolation                                     | **PASS** |
-| Cleanup                  | Temporary directory deleted in `finally` block (`P13-ID-01`)                   | **PASS** |
-| Least privilege          | `sug_scanner` role grants verified in `009_roles_grants.sql`                   | **PASS** |
-| P0–P12 regression        | 40 test files, 530 tests passed with 0 failures                                | **PASS** |
-| Build                    | `pnpm build` (`tsc -b`) exits 0                                                | **PASS** |
-| Typecheck                | `pnpm typecheck` (`tsc -b`) exits 0                                            | **PASS** |
-| Lint                     | `pnpm lint` (`eslint .`) reports 0 errors, 0 warnings                          | **PASS** |
-| Format                   | `pnpm format:check` reports clean formatting                                   | **PASS** |
-| OpenAPI                  | `pnpm openapi:check` verified synchronized                                     | **PASS** |
-| Gitleaks                 | 0 leaks found across git history and filesystem                                | **PASS** |
-| P14+ contamination       | `git diff 2857095..HEAD` verified zero P14+ scope contamination                | **NONE** |
+| Requirement                 | Evidence                                                                                  |  Result  |
+| --------------------------- | ----------------------------------------------------------------------------------------- | :------: |
+| `claim()`                   | `packages/shared/src/jobs.ts` (`claimScanJob`)                                            | **PASS** |
+| `FOR UPDATE SKIP LOCKED`    | `packages/shared/src/jobs.ts` CTE claim query                                             | **PASS** |
+| Atomic claim                | `tests/integration/scanner/p13-concurrency.test.ts` (`P13-01`, `P13-02`)                  | **PASS** |
+| 50 jobs / 4 workers         | 50 unique claims across 4 concurrent workers (`P13-01`)                                   | **PASS** |
+| Zero duplicate claims       | `expect(claims.length).toBe(50)` with unique IDs (`P13-01`)                               | **PASS** |
+| Retry/backoff               | `tests/unit/shared/jobs.test.ts` & `p13-concurrency.test.ts` (`P13-05`)                   | **PASS** |
+| Reaper                      | `packages/shared/src/jobs.ts` (`reapExpiredJobs`)                                         | **PASS** |
+| Worker crash recovery       | `tests/integration/scanner/p13-concurrency.test.ts` (`P13-07 & P13-08`)                   | **PASS** |
+| Actual requeue latency      | **258 ms** measured latency ($T_4 - T_2$)                                                 | **PASS** |
+| Requeue <= 5 minutes        | $258\text{ ms} < 300,000\text{ ms}$ (measured comparison)                                 | **PASS** |
+| Reaper interval enforcement | `MAX_REAPER_INTERVAL_MS = 30s`, `validateReaperInterval`, rejected in code if > 30,000 ms | **PASS** |
+| max_attempts                | Job marked `DEAD` after attempt counter reaches limit (`P13-06`)                          | **PASS** |
+| DEAD                        | Status transitions and timestamp recorded (`P13-06`)                                      | **PASS** |
+| DEAD cannot be claimed      | `claimScanJob` returns `null` for `DEAD` jobs (`P13-10`)                                  | **PASS** |
+| Exact VersionId             | `services/scanner/src/worker.ts` & `p13-worker-identity.test.ts` (`P13-ID-02`)            | **PASS** |
+| SHA-256 verification        | Real-time hash comparison via `timingSafeSha256Equal` (`P13-ID-01`)                       | **PASS** |
+| Size verification           | Stream byte count comparison (`P13-ID-01`, `P13-ID-04`)                                   | **PASS** |
+| Placeholder finding         | Canonical finding in `scan_results` with `scanned_*` fields (`P13-ID-01`)                 | **PASS** |
+| tmpfs                       | Directory `$TMPFS_DIR/<job-id>/` isolation                                                | **PASS** |
+| Cleanup                     | Temporary directory deleted in `finally` block (`P13-ID-01`)                              | **PASS** |
+| Least privilege             | `sug_scanner` role grants verified in `009_roles_grants.sql`                              | **PASS** |
+| P0–P12 regression           | 40 test files, 542 tests passed with 0 failures                                           | **PASS** |
+| Build                       | `pnpm build` (`tsc -b`) exits 0                                                           | **PASS** |
+| Typecheck                   | `pnpm typecheck` (`tsc -b`) exits 0                                                       | **PASS** |
+| Lint                        | `pnpm lint` (`eslint .`) reports 0 errors, 0 warnings                                     | **PASS** |
+| Format                      | `pnpm format:check` reports clean formatting                                              | **PASS** |
+| OpenAPI                     | `pnpm openapi:check` verified synchronized                                                | **PASS** |
+| Gitleaks                    | 0 leaks found across git history and filesystem                                           | **PASS** |
+| P14+ contamination          | `git diff 2857095..HEAD` verified zero P14+ scope contamination                           | **NONE** |
 
 ---
 
@@ -410,12 +431,14 @@ All canonical requirements for Phase P13 are satisfied and empirically validated
   - Lease duration = `240s`
   - Maximum reaper detection interval = `30s`
   - Worst-case recovery bound: $\text{lease} + \text{interval} = 240\text{s} + 30\text{s} = \mathbf{270\text{ seconds}} \le 300\text{ seconds}$ (5 minutes)
+  - Code enforcement via `MAX_REAPER_INTERVAL_MS = 30_000`, `validateReaperInterval()`, and `validateRecoveryBound()`.
+  - Event loop timer qualification: Architectural bound under normal scheduler execution.
 - **Accelerated Test Suite Verification**:
   - Test lease = `200 ms`
   - Immediate reaper sweep
   - Measured requeue latency = `258 ms`
   - Measured recovery latency = `262 ms`
-- All 20 P13 tests and 510 legacy regression tests pass (530/530 total).
+- All 32 P13 tests and 510 legacy regression tests pass (542/542 total across 40 test files).
 - Phase numbering strictly follows the canonical P14–P39 roadmap.
 - VersionId security claims reflect technically precise boundaries.
 - Working tree is clean and ready for Phase P14.

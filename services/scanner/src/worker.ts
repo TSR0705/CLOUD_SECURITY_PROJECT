@@ -6,14 +6,31 @@ import { pipeline } from 'node:stream/promises';
 import {
   type DatabaseExecutor,
   type ClaimedScanJob,
+  type ReaperResult,
   claimScanJob,
   completeScanJob,
   failScanJob,
+  reapExpiredJobs,
   generateWorkerId,
   timingSafeSha256Equal,
+  DEFAULT_LEASE_TIMEOUT_MS,
+  DEFAULT_REAPER_INTERVAL_MS,
+  MAX_REAPER_INTERVAL_MS,
+  CANONICAL_RECOVERY_SLA_MS,
+  validateRecoveryBound,
+  validateReaperInterval,
 } from '@sug/shared';
 import type { StorageProvider } from '@sug/storage';
 import { VersionMissing, NotFound, InvalidRequest } from '@sug/storage';
+
+export {
+  DEFAULT_LEASE_TIMEOUT_MS,
+  DEFAULT_REAPER_INTERVAL_MS,
+  MAX_REAPER_INTERVAL_MS,
+  CANONICAL_RECOVERY_SLA_MS,
+  validateRecoveryBound,
+  validateReaperInterval,
+};
 
 export interface ScannerLogger {
   info(message: string, meta?: Record<string, unknown>): void;
@@ -28,6 +45,8 @@ export interface ScannerWorkerOptions {
   workerId?: string;
   leaseTimeoutMs?: number;
   pollIntervalMs?: number;
+  reaperIntervalMs?: number;
+  enableReaper?: boolean;
   tempDir?: string;
   logger?: ScannerLogger;
   now?: () => Date;
@@ -43,23 +62,40 @@ export interface ProcessJobResult {
 
 export class ScannerWorker {
   readonly workerId: string;
+  readonly leaseTimeoutMs: number;
+  readonly reaperIntervalMs: number;
   private readonly db: DatabaseExecutor;
   private readonly storageProvider: StorageProvider;
-  private readonly leaseTimeoutMs: number;
   private readonly pollIntervalMs: number;
+  private readonly enableReaper: boolean;
   private readonly tempDir: string;
   private readonly logger: ScannerLogger;
   private readonly now: () => Date;
   private running = false;
   private activePromise: Promise<void> | null = null;
+  private reaperPromise: Promise<void> | null = null;
   private sleepResolve: (() => void) | null = null;
+  private reaperSleepResolve: (() => void) | null = null;
+  private reaperExecuting = false;
 
   constructor(options: ScannerWorkerOptions) {
     this.db = options.db;
     this.storageProvider = options.storageProvider;
     this.workerId = options.workerId ?? generateWorkerId();
-    this.leaseTimeoutMs = options.leaseTimeoutMs ?? 240_000;
+    this.leaseTimeoutMs = options.leaseTimeoutMs ?? DEFAULT_LEASE_TIMEOUT_MS;
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
+
+    const rawReaperInterval =
+      options.reaperIntervalMs ??
+      (process.env.SCANNER_REAPER_INTERVAL_MS !== undefined
+        ? Number(process.env.SCANNER_REAPER_INTERVAL_MS)
+        : DEFAULT_REAPER_INTERVAL_MS);
+
+    // Enforce canonical P13 reaper interval and recovery bound
+    validateRecoveryBound(this.leaseTimeoutMs, rawReaperInterval);
+    this.reaperIntervalMs = rawReaperInterval;
+    this.enableReaper = options.enableReaper ?? true;
+
     this.tempDir =
       options.tempDir ??
       process.env.SCANNER_TMPFS_DIR ??
@@ -92,12 +128,16 @@ export class ScannerWorker {
   }
 
   /**
-   * Starts the continuous background polling and processing loop.
+   * Starts the continuous background polling and processing loop, as well as the
+   * periodic reaper sweep loop if enabled.
    */
   start(): void {
     if (this.running) return;
     this.running = true;
     this.activePromise = this.loop();
+    if (this.enableReaper) {
+      this.reaperPromise = this.reaperLoop();
+    }
   }
 
   /**
@@ -110,10 +150,28 @@ export class ScannerWorker {
       this.sleepResolve();
       this.sleepResolve = null;
     }
+    if (this.reaperSleepResolve) {
+      this.reaperSleepResolve();
+      this.reaperSleepResolve = null;
+    }
     if (this.activePromise) {
       await this.activePromise;
       this.activePromise = null;
     }
+    if (this.reaperPromise) {
+      await this.reaperPromise;
+      this.reaperPromise = null;
+    }
+  }
+
+  /**
+   * Triggers an immediate one-off reaper execution.
+   */
+  async reapNow(): Promise<ReaperResult> {
+    return reapExpiredJobs(this.db, {
+      leaseTimeoutMs: this.leaseTimeoutMs,
+      now: this.now,
+    });
   }
 
   isRunning(): boolean {
@@ -366,15 +424,73 @@ export class ScannerWorker {
     }
   }
 
+  private async reaperLoop(): Promise<void> {
+    while (this.running) {
+      if (!this.reaperExecuting) {
+        this.reaperExecuting = true;
+        try {
+          const result = await this.reapNow();
+          if (result.reapedCount > 0) {
+            this.logger.info('Reaper sweep completed', {
+              reapedCount: result.reapedCount,
+              requeuedCount: result.requeuedCount,
+              deadCount: result.deadCount,
+            });
+          }
+        } catch (err) {
+          this.logger.error('Error in reaper loop sweep', {
+            error: (err as Error).message,
+          });
+        } finally {
+          this.reaperExecuting = false;
+        }
+      }
+
+      if (this.running) {
+        await this.sleepReaper(this.reaperIntervalMs);
+      }
+    }
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      this.sleepResolve = resolve;
-      setTimeout(() => {
-        if (this.sleepResolve === resolve) {
+      let timer: NodeJS.Timeout | null = null;
+      const onWake = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (this.sleepResolve === onWake) {
           this.sleepResolve = null;
         }
         resolve();
-      }, ms);
+      };
+      this.sleepResolve = onWake;
+      timer = setTimeout(onWake, ms);
+      if (typeof timer.unref === 'function') {
+        timer.unref();
+      }
+    });
+  }
+
+  private sleepReaper(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      let timer: NodeJS.Timeout | null = null;
+      const onWake = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (this.reaperSleepResolve === onWake) {
+          this.reaperSleepResolve = null;
+        }
+        resolve();
+      };
+      this.reaperSleepResolve = onWake;
+      timer = setTimeout(onWake, ms);
+      if (typeof timer.unref === 'function') {
+        timer.unref();
+      }
     });
   }
 }

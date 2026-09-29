@@ -84,6 +84,60 @@ export interface ReaperResult {
 }
 
 /**
+ * Canonical P13 timing bounds and invariants:
+ * Maximum lease duration + maximum reaper detection interval <= 300 seconds (5 minutes).
+ */
+export const DEFAULT_LEASE_TIMEOUT_MS = 240_000; // 240s / 4 minutes
+export const DEFAULT_REAPER_INTERVAL_MS = 30_000; // 30s
+export const MAX_REAPER_INTERVAL_MS = 30_000; // 30s maximum allowed detection interval
+export const CANONICAL_RECOVERY_SLA_MS = 300_000; // 300s / 5 minutes
+
+/**
+ * Enforces that a configured reaper interval does not exceed the canonical maximum (30s)
+ * and is a valid positive integer.
+ */
+export function validateReaperInterval(intervalMs: number): void {
+  if (
+    typeof intervalMs !== 'number' ||
+    !Number.isInteger(intervalMs) ||
+    Number.isNaN(intervalMs) ||
+    intervalMs <= 0
+  ) {
+    throw new Error(
+      `Invalid reaper interval '${intervalMs}'; must be a positive integer in milliseconds`,
+    );
+  }
+  if (intervalMs > MAX_REAPER_INTERVAL_MS) {
+    throw new Error(
+      `Reaper interval ${intervalMs}ms exceeds maximum allowed threshold of ${MAX_REAPER_INTERVAL_MS}ms (violates canonical P13 recovery bound of ${CANONICAL_RECOVERY_SLA_MS}ms)`,
+    );
+  }
+}
+
+/**
+ * Validates that lease duration plus reaper detection interval strictly respects
+ * the canonical 5-minute (300,000 ms) recovery SLA.
+ */
+export function validateRecoveryBound(leaseTimeoutMs: number, reaperIntervalMs: number): void {
+  validateReaperInterval(reaperIntervalMs);
+  if (
+    typeof leaseTimeoutMs !== 'number' ||
+    !Number.isInteger(leaseTimeoutMs) ||
+    Number.isNaN(leaseTimeoutMs) ||
+    leaseTimeoutMs <= 0
+  ) {
+    throw new Error(
+      `Invalid lease timeout '${leaseTimeoutMs}'; must be a positive integer in milliseconds`,
+    );
+  }
+  if (leaseTimeoutMs + reaperIntervalMs > CANONICAL_RECOVERY_SLA_MS) {
+    throw new Error(
+      `Recovery bound ${leaseTimeoutMs + reaperIntervalMs}ms (lease: ${leaseTimeoutMs}ms + reaper: ${reaperIntervalMs}ms) exceeds canonical P13 maximum of ${CANONICAL_RECOVERY_SLA_MS}ms`,
+    );
+  }
+}
+
+/**
  * Generates an informative, unique worker identifier for auditing and lease tracking.
  */
 export function generateWorkerId(prefix = 'scanner-worker'): string {
@@ -321,7 +375,7 @@ export async function reapExpiredJobs(
   options: ReaperOptions = {},
 ): Promise<ReaperResult> {
   const now = options.now ? options.now() : new Date();
-  const leaseTimeoutMs = options.leaseTimeoutMs ?? 240_000; // 240 seconds (4 minutes) default
+  const leaseTimeoutMs = options.leaseTimeoutMs ?? DEFAULT_LEASE_TIMEOUT_MS;
   const batchSize = options.batchSize ?? 100;
   const baseBackoffMs = options.baseBackoffMs ?? 1000;
   const maxBackoffMs = options.maxBackoffMs ?? 60_000;
