@@ -7,6 +7,7 @@ import { PolicyService } from '../policy/policy-service.js';
 import { UploadSessionService, UploadSessionError } from './session-service.js';
 import type { UploadJwtPayload } from './upload-token.js';
 import { CountingHashStream, StreamLimitExceededError } from './counting-stream.js';
+import { createArtifactIdentity, type ArtifactIdentity } from '@sug/shared';
 
 function toSafeUuid(id?: string | null): string | null {
   if (!id) return null;
@@ -39,6 +40,7 @@ export interface StreamingUploadResult {
   versionId: string;
   size: number;
   sha256: string;
+  identity?: ArtifactIdentity;
 }
 
 export interface UploadStatusResult {
@@ -46,6 +48,7 @@ export interface UploadStatusResult {
   status: string;
   fileId?: string | null;
   fileStatus?: string | null;
+  identity?: ArtifactIdentity | null;
   createdAt: Date | string;
   completedAt?: Date | string | null;
   expiresAt?: Date | string | null;
@@ -343,6 +346,14 @@ export class StreamingUploadService {
       client.release();
     }
 
+    const identity = createArtifactIdentity({
+      bucket: this.quarantineBucket,
+      objectKey: quarantineKey,
+      versionId: putResult.versionId,
+      sha256: computedSha256,
+      sizeBytes: bytesReceived,
+    });
+
     return {
       fileId,
       fileVersionId,
@@ -351,6 +362,7 @@ export class StreamingUploadService {
       versionId: putResult.versionId,
       size: bytesReceived,
       sha256: computedSha256,
+      identity,
     };
   }
 
@@ -381,17 +393,53 @@ export class StreamingUploadService {
     }
 
     if (session.status === 'UPLOADED') {
-      const fileRes = await this.db.query<{ id: string; status: string }>(
-        `SELECT id, status FROM files WHERE upload_session_id = $1`,
+      const fileRes = await this.db.query<{
+        id: string;
+        status: string;
+        bucket: string | null;
+        object_key: string | null;
+        storage_version_id: string | null;
+        size_bytes: string | number | null;
+        sha256_ingest: Buffer | string | null;
+      }>(
+        `SELECT f.id, f.status, fv.bucket, fv.object_key, fv.storage_version_id, fv.size_bytes, fv.sha256_ingest
+         FROM files f
+         LEFT JOIN file_versions fv ON fv.id = f.current_version_id
+         WHERE f.upload_session_id = $1`,
         [sessionId],
       );
       const file = fileRes.rows[0];
+
+      let identity: ArtifactIdentity | null = null;
+      if (
+        file &&
+        file.bucket &&
+        file.object_key &&
+        file.storage_version_id &&
+        file.sha256_ingest !== null &&
+        file.sha256_ingest !== undefined &&
+        file.size_bytes !== null &&
+        file.size_bytes !== undefined
+      ) {
+        try {
+          identity = createArtifactIdentity({
+            bucket: file.bucket,
+            objectKey: file.object_key,
+            versionId: file.storage_version_id,
+            sha256: file.sha256_ingest,
+            sizeBytes: file.size_bytes,
+          });
+        } catch {
+          identity = null;
+        }
+      }
 
       return {
         sessionId: session.id,
         status: session.status,
         fileId: file?.id ?? null,
         fileStatus: file?.status ?? null,
+        identity,
         createdAt: session.created_at,
         completedAt: session.completed_at,
       };
@@ -400,6 +448,7 @@ export class StreamingUploadService {
     return {
       sessionId: session.id,
       status: session.status,
+      identity: null,
       createdAt: session.created_at,
       expiresAt: session.expires_at,
     };

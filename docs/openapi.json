@@ -2255,6 +2255,29 @@
                     },
                     "sha256": {
                       "type": "string"
+                    },
+                    "identity": {
+                      "type": "object",
+                      "properties": {
+                        "bucket": {
+                          "type": "string"
+                        },
+                        "objectKey": {
+                          "type": "string"
+                        },
+                        "versionId": {
+                          "type": "string"
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": ["bucket", "objectKey", "versionId", "sha256", "sizeBytes"]
                     }
                   }
                 }
@@ -2602,19 +2625,47 @@
                     },
                     "fileId": {
                       "type": "string",
-                      "format": "uuid"
+                      "format": "uuid",
+                      "nullable": true
                     },
                     "fileStatus": {
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "identity": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "bucket": {
+                          "type": "string"
+                        },
+                        "objectKey": {
+                          "type": "string"
+                        },
+                        "versionId": {
+                          "type": "string"
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": ["bucket", "objectKey", "versionId", "sha256", "sizeBytes"]
                     },
                     "createdAt": {
                       "type": "string"
                     },
                     "completedAt": {
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
                     },
                     "expiresAt": {
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
                     }
                   }
                 }
