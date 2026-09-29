@@ -10,7 +10,9 @@ import {
   VERSION_COMMAND,
   parseClamAvResponse,
   parseClamAvVersion,
+  createClamAvSignatureAgeGauge,
 } from '@sug/scanner';
+import { Registry } from '@prometheus-io/client';
 
 describe('ClamAV Scanner Unit Tests (P14)', () => {
   describe('Protocol Framing & Constants', () => {
@@ -287,6 +289,46 @@ describe('ClamAV Scanner Unit Tests (P14)', () => {
       expect(sigInfo.available).toBe(false);
       expect(sigInfo.ageSeconds).toBeNull();
       expect(sigInfo.error).toBeDefined();
+    });
+
+    it('creates clamav_signature_age_seconds gauge and exposes Prometheus metric', async () => {
+      await createMockServer((socket) => {
+        socket.on('data', (d) => {
+          if (d.toString().startsWith('VERSION')) {
+            socket.write('ClamAV 1.4.6/28136/Sun Sep 27 06:26:12 2026\0');
+            socket.end();
+          }
+        });
+      });
+
+      const registry = new Registry();
+      const scanner = new ClamAvScanner({ port: serverPort, host: '127.0.0.1' });
+      const gauge = createClamAvSignatureAgeGauge(scanner, { registry });
+
+      expect(gauge).toBeDefined();
+      const metricsText = await registry.metrics();
+      expect(metricsText).toContain('# TYPE clamav_signature_age_seconds gauge');
+      expect(metricsText).toContain('clamav_signature_age_seconds');
+      // Verify value is a valid positive number
+      const match = metricsText.match(/clamav_signature_age_seconds\s+(\d+)/);
+      expect(match).not.toBeNull();
+      expect(Number(match![1])).toBeGreaterThan(0);
+
+      await closeMockServer();
+    });
+
+    it('sets clamav_signature_age_seconds gauge to NaN when clamd is unreachable (never 0)', async () => {
+      const registry = new Registry();
+      const badScanner = new ClamAvScanner({
+        port: 65430,
+        host: '127.0.0.1',
+        connectTimeoutMs: 500,
+      });
+      createClamAvSignatureAgeGauge(badScanner, { registry });
+
+      const metricsText = await registry.metrics();
+      expect(metricsText).toContain('# TYPE clamav_signature_age_seconds gauge');
+      expect(metricsText).toContain('clamav_signature_age_seconds Nan');
     });
   });
 });

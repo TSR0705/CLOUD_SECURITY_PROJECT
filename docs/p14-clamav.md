@@ -186,7 +186,18 @@ In `services/scanner/src/worker.ts`:
 
 ---
 
-## 8. EICAR Test Strategy
+## 8. Failure Boundaries & Scan-07 Verification
+
+Phase P14 provides two distinct, complementary test suites for mid-stream scan failure:
+
+1. **Unit Fault-Injection Test (`tests/unit/scanner/clamav.test.ts` & `scan-07` in integration suite)**:
+   Validates TCP socket failure handling using a controlled mock server that abruptly destroys the socket mid-stream. Verifies that the client parser catches the broken socket and fails closed with `ERROR`.
+2. **Canonical Real Container Termination (`scan-07-real-clamd-kill` in `tests/integration/scanner/p14-clamav.test.ts`)**:
+   Satisfies the canonical real-clamd kill requirement by establishing that `sug-clamav` is healthy, initiating an active INSTREAM scan with a paced stream, confirming that the scan is actively transmitting, terminating the real `sug-clamav` Docker container mid-scan (`docker kill sug-clamav`), and verifying that the scanner returns `ERROR` rather than `CLEAN`. The container is then restored and verified healthy in the `finally` block.
+
+---
+
+## 9. EICAR Test Strategy
 
 To prevent security alarms or false repository flags, **no static EICAR string is committed to Git**.
 
@@ -210,41 +221,41 @@ stream: Eicar-Test-Signature FOUND
 
 ---
 
-## 9. Signature Age Metric
+## 10. Signature Age Metric & Prometheus Gauge
 
-ClamAV's database release date is queried via the `VERSION` command over TCP, returning a string such as:
+Phase P14 implements both programmatic signature age calculation and an observable Prometheus Gauge conforming to DEC-006 (`@prometheus-io/client 0.16.x`):
+
+### Metric Specification
+
+- **Metric Name**: `clamav_signature_age_seconds`
+- **Metric Type**: `Gauge`
+- **Units**: `seconds`
+- **Source Timestamp**: ClamAV CVD virus signature database release timestamp queried via TCP `VERSION` command (e.g. `ClamAV 1.4.6/28136/Sun Sep 27 06:26:12 2026`).
+- **Update / Collection Mechanism**: On scrape, the Prometheus registry triggers the gauge's asynchronous `collect()` hook which queries `clamavScanner.getSignatureAge()` and updates the gauge value: `Math.max(0, Math.floor((currentTime - dbDate) / 1000))`.
+- **Unavailable / Failure Behavior**: If `clamd` is unreachable, times out, or returns an unparseable version string, the gauge is set to `NaN` (conforming to Prometheus standard for undefined/unavailable values). It **never silently returns 0 or a fake timestamp**.
+
+### Prometheus Exposition Format
 
 ```
-ClamAV 1.4.6/28136/Sun Sep 27 06:26:12 2026
+# HELP clamav_signature_age_seconds Age of ClamAV virus signature database in seconds
+# TYPE clamav_signature_age_seconds gauge
+clamav_signature_age_seconds 59134
 ```
-
-`getSignatureAge()` parses the database publication timestamp and calculates the age in elapsed seconds:
-
-```json
-{
-  "available": true,
-  "ageSeconds": 230578,
-  "version": "1.4.6",
-  "dbVersion": 28136,
-  "dbDate": "2026-09-27T00:56:12.000Z"
-}
-```
-
-If clamd is unreachable or returns an invalid string, it returns `{ available: false, ageSeconds: null }` and **never silently returns 0**.
 
 ---
 
-## 10. Definition of Done Checklist
+## 11. Definition of Done Checklist
 
-| Item | Requirement                                                | Status   | Evidence File                                                                    |
-| ---- | ---------------------------------------------------------- | -------- | -------------------------------------------------------------------------------- |
-| 1    | ClamAV 1.4.6 container service in docker-compose           | Complete | `infrastructure/docker/docker-compose.yml`, `docs/evidence/p14/clamd-health.txt` |
-| 2    | INSTREAM protocol client implementation                    | Complete | `packages/scanner/src/clamav.ts`, `tests/unit/scanner/clamav.test.ts`            |
-| 3    | EICAR detection test passing (`FOUND`)                     | Complete | `docs/evidence/p14/scan-01-eicar.txt`                                            |
-| 4    | Clean artifact test passing (`CLEAN`)                      | Complete | `docs/evidence/p14/scan-02-benign.txt`                                           |
-| 5    | Mid-scan disconnect fail-closed test (`ERROR`)             | Complete | `docs/evidence/p14/scan-07-mid-scan-failure.txt`                                 |
-| 6    | Resource limit exceeded fail-closed test (`ERROR`)         | Complete | `docs/evidence/p14/scan-09-limit-exceeded.txt`                                   |
-| 7    | ClamAV unavailable fail-closed test (`ERROR`)              | Complete | `docs/evidence/p14/scan-10-unavailable.txt`                                      |
-| 8    | Signature age metric query and calculation                 | Complete | `docs/evidence/p14/signature-age.txt`                                            |
-| 9    | Worker end-to-end integration and scan_results persistence | Complete | `tests/integration/scanner/p14-clamav.test.ts`                                   |
-| 10   | Zero regressions in full test suite (567/567 passed)       | Complete | `docs/evidence/p14/test-summary.txt`                                             |
+| Item | Requirement                                                     | Status   | Evidence File                                                                       |
+| ---- | --------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
+| 1    | ClamAV 1.4.6 container service in docker-compose                | Complete | `infrastructure/docker/docker-compose.yml`, `docs/evidence/p14/clamd-health.txt`    |
+| 2    | INSTREAM protocol client implementation                         | Complete | `packages/scanner/src/clamav.ts`, `tests/unit/scanner/clamav.test.ts`               |
+| 3    | EICAR detection test passing (`FOUND`)                          | Complete | `docs/evidence/p14/scan-01-eicar.txt`                                               |
+| 4    | Clean artifact test passing (`CLEAN`)                           | Complete | `docs/evidence/p14/scan-02-benign.txt`                                              |
+| 5    | Mid-scan mock disconnect fail-closed test (`ERROR`)             | Complete | `docs/evidence/p14/scan-07-mid-scan-failure.txt`                                    |
+| 6    | Real `sug-clamav` container termination test (`ERROR`)          | Complete | `docs/evidence/p14/scan-07-real-clamd-kill.txt`                                     |
+| 7    | Resource limit exceeded fail-closed test (`ERROR`)              | Complete | `docs/evidence/p14/scan-09-limit-exceeded.txt`                                      |
+| 8    | ClamAV unavailable fail-closed test (`ERROR`)                   | Complete | `docs/evidence/p14/scan-10-unavailable.txt`                                         |
+| 9    | Signature age Prometheus Gauge (`clamav_signature_age_seconds`) | Complete | `docs/evidence/p14/signature-age.txt`, `docs/evidence/p14/signature-age-metric.txt` |
+| 10   | Worker end-to-end integration and scan_results persistence      | Complete | `tests/integration/scanner/p14-clamav.test.ts`                                      |
+| 11   | Zero regressions in full test suite (571/571 passed)            | Complete | `docs/evidence/p14/test-summary.txt`                                                |

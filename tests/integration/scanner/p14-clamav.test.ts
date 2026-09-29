@@ -13,9 +13,10 @@ import {
   HeadBucketCommand,
   PutBucketVersioningCommand,
 } from '@aws-sdk/client-s3';
+import { execSync } from 'node:child_process';
 import { createPool, createBaseFixtures, type FixtureContext } from '../db/helpers.js';
 import { createS3Provider, type StorageProvider } from '@sug/storage';
-import { ClamAvScanner } from '@sug/scanner';
+import { ClamAvScanner, createClamAvSignatureAgeGauge, Registry } from '@sug/scanner';
 import { ScannerWorker } from '../../../services/scanner/src/worker.js';
 
 const S3_ENDPOINT = process.env.S3_ENDPOINT || 'http://localhost:4566';
@@ -274,6 +275,88 @@ describe('Phase P14: ClamAV Integration & EICAR Scanning (DoD Test Suite)', () =
   });
 
   // ============================================================
+  // scan-07-real-clamd-kill: Real sug-clamav Container Termination Mid-Scan
+  // ============================================================
+  it('scan-07-real-clamd-kill: fails closed (ERROR / not CLEAN) when real sug-clamav container is killed during active scan', async () => {
+    // 1. Verify that real sug-clamav is initially healthy
+    const initialHealth = await clamavScanner.ping();
+    expect(initialHealth).toBe(true);
+
+    let chunksSent = 0;
+    let containerKilled = false;
+    let signalScanActive!: () => void;
+    const scanActivePromise = new Promise<void>((resolve) => {
+      signalScanActive = resolve;
+    });
+
+    // Paced stream that actively sends 64KB slices with controlled pacing
+    const slowStream = new Readable({
+      async read() {
+        if (containerKilled) {
+          this.push(null);
+          return;
+        }
+        if (chunksSent < 100) {
+          chunksSent++;
+          this.push(Buffer.alloc(64 * 1024, 0x41));
+          // Once 5 chunks (320 KB) have actively entered the clamd INSTREAM session, signal active scan
+          if (chunksSent === 5) {
+            signalScanActive();
+          }
+          await new Promise((r) => setTimeout(r, 40));
+        } else {
+          this.push(null);
+        }
+      },
+    });
+
+    try {
+      // 2. Start the scan against the real ClamAV daemon
+      const scanPromise = clamavScanner.scanStream(slowStream, { scanTimeoutMs: 15_000 });
+
+      // 3. Guarantee that the scan is actively transmitting into real clamd
+      await scanActivePromise;
+      expect(chunksSent).toBeGreaterThanOrEqual(5);
+
+      // 4. Abruptly kill the real sug-clamav Docker container mid-scan
+      containerKilled = true;
+      execSync('docker kill sug-clamav', { stdio: 'ignore' });
+
+      // 5. Await scanner result
+      const result = await scanPromise;
+
+      // 6. Assert fail-closed contract: result is ERROR and never CLEAN
+      expect(result.status).toBe('ERROR');
+      expect(result.status).not.toBe('CLEAN');
+      expect(result.error).toBeDefined();
+    } finally {
+      // 7. Robust cleanup: restart sug-clamav and wait until fully healthy
+      try {
+        execSync('docker start sug-clamav', { stdio: 'ignore' });
+      } catch {
+        // ignore if already running
+      }
+
+      let recovered = false;
+      for (let attempt = 0; attempt < 45; attempt++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          if (await clamavScanner.ping()) {
+            recovered = true;
+            break;
+          }
+        } catch {
+          // continue waiting
+        }
+      }
+
+      if (!recovered) {
+        throw new Error('Failed to restore sug-clamav container to healthy state after test');
+      }
+    }
+  }, 90_000);
+
+  // ============================================================
   // scan-09: Configured Scan / Resource Limits Behavior
   // ============================================================
   it('scan-09: fails closed (ERROR / non-clean) when stream exceeds configured StreamMaxLength (55M)', async () => {
@@ -340,6 +423,31 @@ describe('Phase P14: ClamAV Integration & EICAR Scanning (DoD Test Suite)', () =
     expect(sigInfo.dbDate).toBeInstanceOf(Date);
     expect(typeof sigInfo.ageSeconds).toBe('number');
     expect(sigInfo.ageSeconds).toBeGreaterThanOrEqual(0);
+  });
+
+  it('scan-sig-age-gauge: exposes clamav_signature_age_seconds Prometheus gauge reflecting actual ClamAV database publication timestamp', async () => {
+    const registry = new Registry();
+    const gauge = createClamAvSignatureAgeGauge(clamavScanner, { registry });
+
+    expect(gauge).toBeDefined();
+
+    // Trigger metrics collection from registry
+    const metricsOutput = await registry.metrics();
+
+    expect(metricsOutput).toContain(
+      '# HELP clamav_signature_age_seconds Age of ClamAV virus signature database in seconds',
+    );
+    expect(metricsOutput).toContain('# TYPE clamav_signature_age_seconds gauge');
+
+    const match = metricsOutput.match(/clamav_signature_age_seconds\s+(\d+)/);
+    expect(match).not.toBeNull();
+    const metricAge = Number(match![1]);
+    expect(metricAge).toBeGreaterThanOrEqual(0);
+
+    // Verify it matches getSignatureAge within a few seconds margin
+    const sigInfo = await clamavScanner.getSignatureAge();
+    expect(sigInfo.available).toBe(true);
+    expect(Math.abs(metricAge - sigInfo.ageSeconds!)).toBeLessThanOrEqual(5);
   });
 
   // ============================================================

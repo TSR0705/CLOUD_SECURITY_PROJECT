@@ -1,5 +1,7 @@
 import net from 'node:net';
 import type { Readable } from 'node:stream';
+import type { Gauge, Registry } from '@prometheus-io/client';
+import { createClamAvSignatureAgeGauge } from './metrics.js';
 
 export type ClamAvScanStatus = 'CLEAN' | 'FOUND' | 'ERROR';
 
@@ -463,5 +465,12 @@ export class ClamAvScanner {
         }
       });
     });
+  }
+
+  /**
+   * Registers and returns a Prometheus Gauge for clamav_signature_age_seconds.
+   */
+  registerMetrics(registry?: Registry): Gauge {
+    return createClamAvSignatureAgeGauge(this, { registry });
   }
 }
