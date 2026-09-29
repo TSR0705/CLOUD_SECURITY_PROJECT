@@ -1,0 +1,21 @@
+=== SCAN-02: Benign File Clean Scan Evidence ===
+Test Case: scan-02 (Clean artifact scan)
+Engine: ClamAV 1.4.6 (container sug-clamav)
+Protocol: INSTREAM (zINSTREAM\0, chunk-framed, 4-byte terminator)
+Payload: Benign document payload
+
+Execution Output:
+{
+  "status": "CLEAN",
+  "signature": null,
+  "rawResponse": "stream: OK",
+  "durationMs": 10,
+  "error": null
+}
+
+Verification Invariants:
+1. status === 'CLEAN' (true)
+2. signature === null (true)
+3. rawResponse === 'stream: OK' (true)
+4. Worker scan_results outcome: 'PASS', reason_code: 'CLEAN', severity: 'INFO', confidence: 'CONFIRMED'
+5. Only exact 'stream: OK' yields CLEAN.

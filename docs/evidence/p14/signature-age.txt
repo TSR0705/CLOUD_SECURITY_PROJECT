@@ -1,0 +1,19 @@
+=== ClamAV Signature Age Evidence ===
+Command: VERSION over TCP to sug-clamav:3310
+Raw Response: ClamAV 1.4.6/28136/Sun Sep 27 06:26:12 2026
+
+Parsed Output:
+{
+  "available": true,
+  "ageSeconds": 230578,
+  "version": "1.4.6",
+  "dbVersion": 28136,
+  "dbDate": "2026-09-27T00:56:12.000Z"
+}
+
+Verification Invariants:
+1. available === true
+2. ageSeconds is a positive integer reflecting elapsed seconds since signature database release.
+3. version === '1.4.6' (official release matching canonical project specification)
+4. dbVersion is an integer (28136)
+5. If clamd is unreachable or unparseable, getSignatureAge returns { available: false, ageSeconds: null } and NEVER silently returns 0.

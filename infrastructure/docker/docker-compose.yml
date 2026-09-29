@@ -70,6 +70,37 @@ services:
       retries: 5
       start_period: 5s
 
+  clamav:
+    image: clamav/clamav:1.4.6
+    container_name: sug-clamav
+    restart: unless-stopped
+    ports:
+      - '${CLAMAV_PORT:-3310}:3310'
+    environment:
+      CLAMD_CONF_StreamMaxLength: 55M
+      CLAMD_CONF_MaxFileSize: 55M
+      CLAMD_CONF_MaxScanSize: 200M
+      CLAMD_CONF_MaxRecursion: '10'
+      CLAMD_CONF_MaxFiles: '2000'
+      CLAMD_CONF_MaxScanTime: '60000'
+      CLAMD_CONF_AlertExceedsMax: 'yes'
+      CLAMD_CONF_AlertEncrypted: 'yes'
+      CLAMD_CONF_AlertEncryptedArchive: 'yes'
+      CLAMD_CONF_MaxThreads: '4'
+      CLAMD_CONF_ConcurrentDatabaseReload: 'no'
+      CLAMAV_NO_FRESHCLAMD: 'false'
+      FRESHCLAM_CHECKS: '1'
+    deploy:
+      resources:
+        limits:
+          memory: 4096M
+    healthcheck:
+      test: ['CMD-SHELL', 'clamdcheck.sh']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
 volumes:
   postgres_data:
     name: sug_postgres_data

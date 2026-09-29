@@ -1,0 +1,18 @@
+=== SCAN-07: Mid-Scan Abrupt Connection Failure Evidence ===
+Test Case: scan-07 (Connection reset / mid-scan socket abort)
+Scenario: clamd or network connection terminates unexpectedly during stream transmission
+
+Execution Output:
+{
+  "status": "ERROR",
+  "signature": null,
+  "durationMs": 7,
+  "error": "ClamAV socket closed unexpectedly without sending response (hadError=false)"
+}
+
+Verification Invariants:
+1. status === 'ERROR' (true)
+2. status !== 'CLEAN' (true)
+3. Fail-closed contract: An interrupted or broken connection NEVER defaults to CLEAN.
+4. Worker scan_results outcome: 'ERROR', reason_code: 'SCANNER_ERROR', severity: 'HIGH'
+5. Scan job is failed via failScanJob with retry/backoff.

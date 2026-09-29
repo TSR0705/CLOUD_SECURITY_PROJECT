@@ -1,0 +1,16 @@
+=== ClamAV Container Health Evidence ===
+Timestamp: 2026-09-29T16:58:58Z
+Service: sug-clamav
+Image: clamav/clamav:1.4.6
+Status: healthy (Up 14 minutes)
+Port: 0.0.0.0:3310 -> 3310/tcp
+
+$ docker exec sug-clamav clamdcheck.sh
+Clamd is up
+
+$ docker ps --filter name=sug-clamav
+CONTAINER ID   IMAGE                 COMMAND   CREATED          STATUS                    PORTS                                         NAMES
+ecf5f9f3303e   clamav/clamav:1.4.6   "/init"   14 minutes ago   Up 14 minutes (healthy)   0.0.0.0:3310->3310/tcp, [::]:3310->3310/tcp   sug-clamav
+
+$ docker inspect sug-clamav --format 'Health Status: {{.State.Health.Status}} | Image: {{.Config.Image}}'
+Health Status: healthy | Image: clamav/clamav:1.4.6
