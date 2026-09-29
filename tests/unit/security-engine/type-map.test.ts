@@ -76,9 +76,30 @@ describe('Canonical Type Map & 100% Branch Coverage', () => {
 
     it('returns false for mismatched extensions and MIMEs', () => {
       expect(isExtensionAllowedForCanonical('PDF', '.jpg')).toBe(false);
+      expect(isExtensionAllowedForCanonical('PDF', 'jpg')).toBe(false);
       expect(isMimeAllowedForCanonical('PDF', 'image/jpeg')).toBe(false);
       expect(isExtensionAllowedForCanonical('JPEG', '.pdf')).toBe(false);
       expect(isMimeAllowedForCanonical('JPEG', 'application/pdf')).toBe(false);
+    });
+
+    it('handles extensions with and without leading dot for isExtensionAllowedForCanonical', () => {
+      expect(isExtensionAllowedForCanonical('PDF', 'pdf')).toBe(true);
+      expect(isExtensionAllowedForCanonical('PDF', '.pdf')).toBe(true);
+    });
+
+    it('handles MIME types with parameters in isMimeAllowedForCanonical', () => {
+      expect(isMimeAllowedForCanonical('PDF', 'application/pdf; charset=binary')).toBe(true);
+      expect(isMimeAllowedForCanonical('PDF', 'application/json; charset=utf-8')).toBe(false);
+    });
+
+    it('resolves magic with leading dot in magic extension', () => {
+      expect(getCanonicalTypeFromMagic('.pdf')).toBe('PDF');
+      expect(getCanonicalTypeFromMagic('pdf')).toBe('PDF');
+    });
+
+    it('falls back to magic MIME when magic extension is unrecognized', () => {
+      expect(getCanonicalTypeFromMagic('unrecognized_ext', 'application/pdf')).toBe('PDF');
+      expect(getCanonicalTypeFromMagic('unrecognized_ext', 'unrecognized/mime')).toBeUndefined();
     });
   });
 

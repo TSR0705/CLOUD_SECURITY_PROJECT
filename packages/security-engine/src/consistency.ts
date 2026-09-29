@@ -30,8 +30,8 @@ export function validateTypeConsistency(input: TypeConsistencyInput): TypeConsis
   const { extension, declaredMime, magicMime, magicExt } = input;
   const discrepancies: string[] = [];
 
-  const extType = extension ? getCanonicalTypeFromExtension(extension) : undefined;
-  const mimeType = declaredMime ? getCanonicalTypeFromMime(declaredMime) : undefined;
+  const extType = getCanonicalTypeFromExtension(extension ?? undefined);
+  const mimeType = getCanonicalTypeFromMime(declaredMime ?? undefined);
   const magicType = getCanonicalTypeFromMagic(magicExt ?? undefined, magicMime ?? undefined);
 
   // Case 1: Magic bytes detection vs Extension

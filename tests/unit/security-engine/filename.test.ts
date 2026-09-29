@@ -160,9 +160,24 @@ describe('DoD: val-08 — Filename Safety & Path Traversal Rejection', () => {
       expect(result.reasonCode).toBe('NAME_TOO_LONG');
     });
 
+    it('accepts exact 255-character valid filename', () => {
+      const exact255 = `${'a'.repeat(251)}.pdf`;
+      expect(exact255.length).toBe(255);
+      const result = validateFilename(exact255);
+      expect(result.valid).toBe(true);
+      expect(result.sanitized.length).toBe(255);
+    });
+
     it('sanitizes long filenames to at most 255 characters while preserving extension', () => {
       const longName = `${'a'.repeat(300)}.pdf`;
       const sanitized = sanitizeFilename(longName);
+      expect(sanitized.length).toBe(255);
+      expect(sanitized.endsWith('.pdf')).toBe(true);
+    });
+
+    it('sanitizes long multi-byte Unicode filenames to at most 255 characters while preserving extension', () => {
+      const unicodeLong = `${'é'.repeat(300)}.pdf`;
+      const sanitized = sanitizeFilename(unicodeLong);
       expect(sanitized.length).toBe(255);
       expect(sanitized.endsWith('.pdf')).toBe(true);
     });

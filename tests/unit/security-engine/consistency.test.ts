@@ -121,5 +121,69 @@ describe('DoD: val-06 — Detector Consistency Rule (Extension vs Declared MIME 
       expect(res.reasonCode).toBe('UNDETERMINED');
       expect(res.canonicalType).toBeUndefined();
     });
+
+    it('returns UNDETERMINED when input is completely empty or undefined', () => {
+      const res = validateTypeConsistency({});
+      expect(res.consistent).toBe(false);
+      expect(res.reasonCode).toBe('UNDETERMINED');
+      expect(res.canonicalType).toBeUndefined();
+    });
+
+    it('resolves consistent when extension is omitted but declared MIME and magic agree', () => {
+      const res = validateTypeConsistency({
+        declaredMime: 'application/pdf',
+        magicMime: 'application/pdf',
+      });
+      expect(res.consistent).toBe(true);
+      expect(res.reasonCode).toBe('CONSISTENT');
+      expect(res.canonicalType).toBe('PDF');
+    });
+
+    it('resolves consistent when declared MIME is omitted but extension and magic agree', () => {
+      const res = validateTypeConsistency({
+        extension: '.pdf',
+        magicExt: 'pdf',
+      });
+      expect(res.consistent).toBe(true);
+      expect(res.reasonCode).toBe('CONSISTENT');
+      expect(res.canonicalType).toBe('PDF');
+    });
+
+    it('resolves consistent when magic bytes are absent but extension and declared MIME agree', () => {
+      const res = validateTypeConsistency({
+        extension: '.pdf',
+        declaredMime: 'application/pdf',
+      });
+      expect(res.consistent).toBe(true);
+      expect(res.reasonCode).toBe('CONSISTENT');
+      expect(res.canonicalType).toBe('PDF');
+    });
+
+    it('resolves consistent when only extension is provided', () => {
+      const res = validateTypeConsistency({
+        extension: '.pdf',
+      });
+      expect(res.consistent).toBe(true);
+      expect(res.reasonCode).toBe('CONSISTENT');
+      expect(res.canonicalType).toBe('PDF');
+    });
+
+    it('resolves consistent when only declared MIME is provided', () => {
+      const res = validateTypeConsistency({
+        declaredMime: 'application/pdf',
+      });
+      expect(res.consistent).toBe(true);
+      expect(res.reasonCode).toBe('CONSISTENT');
+      expect(res.canonicalType).toBe('PDF');
+    });
+
+    it('resolves consistent when only magic is provided', () => {
+      const res = validateTypeConsistency({
+        magicMime: 'application/pdf',
+      });
+      expect(res.consistent).toBe(true);
+      expect(res.reasonCode).toBe('CONSISTENT');
+      expect(res.canonicalType).toBe('PDF');
+    });
   });
 });

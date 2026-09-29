@@ -90,7 +90,6 @@ export const CANONICAL_TYPE_DEFINITIONS: Record<CanonicalFileType, CanonicalType
       'application/zip',
     ],
     containerType: 'ZIP',
-    compatibleTypes: ['ZIP'],
   },
   XLSX: {
     id: 'XLSX',
@@ -108,7 +107,6 @@ export const CANONICAL_TYPE_DEFINITIONS: Record<CanonicalFileType, CanonicalType
       'application/zip',
     ],
     containerType: 'ZIP',
-    compatibleTypes: ['ZIP'],
   },
   PPTX: {
     id: 'PPTX',
@@ -126,7 +124,6 @@ export const CANONICAL_TYPE_DEFINITIONS: Record<CanonicalFileType, CanonicalType
       'application/zip',
     ],
     containerType: 'ZIP',
-    compatibleTypes: ['ZIP'],
   },
   ZIP: {
     id: 'ZIP',
@@ -137,7 +134,6 @@ export const CANONICAL_TYPE_DEFINITIONS: Record<CanonicalFileType, CanonicalType
     mimeTypes: ['application/zip', 'application/x-zip-compressed'],
     magicExtensions: ['zip'],
     magicMimes: ['application/zip', 'application/x-zip-compressed'],
-    compatibleTypes: ['DOCX', 'XLSX', 'PPTX'],
   },
   TAR: {
     id: 'TAR',
@@ -272,12 +268,8 @@ const MAGIC_MIME_TO_TYPE = new Map<string, CanonicalFileType>();
 for (const def of Object.values(CANONICAL_TYPE_DEFINITIONS)) {
   EXTENSION_TO_TYPE.set(def.primaryExtension.toLowerCase(), def.id);
   MIME_TO_TYPE.set(def.primaryMime.toLowerCase(), def.id);
-  if (def.magicExtensions.length > 0) {
-    MAGIC_EXT_TO_TYPE.set(def.magicExtensions[0]!.toLowerCase(), def.id);
-  }
-  if (def.magicMimes.length > 0) {
-    MAGIC_MIME_TO_TYPE.set(def.magicMimes[0]!.toLowerCase(), def.id);
-  }
+  MAGIC_EXT_TO_TYPE.set(def.magicExtensions[0]!.toLowerCase(), def.id);
+  MAGIC_MIME_TO_TYPE.set(def.magicMimes[0]!.toLowerCase(), def.id);
 }
 
 // 2. Second pass: Register alternative extensions, MIMEs, and magic signatures without overwriting primary entries
@@ -336,7 +328,7 @@ export function getCanonicalTypeFromExtension(
  */
 export function getCanonicalTypeFromMime(rawMime?: string): CanonicalFileType | undefined {
   if (!rawMime) return undefined;
-  const cleanMime = rawMime.split(';')[0]?.trim().toLowerCase() ?? '';
+  const cleanMime = rawMime.split(';')[0]!.trim().toLowerCase();
   return MIME_TO_TYPE.get(cleanMime);
 }
 
@@ -353,7 +345,7 @@ export function getCanonicalTypeFromMagic(
     if (typeByExt) return typeByExt;
   }
   if (magicMime) {
-    const cleanMime = magicMime.split(';')[0]?.trim().toLowerCase() ?? '';
+    const cleanMime = magicMime.split(';')[0]!.trim().toLowerCase();
     const typeByMime = MAGIC_MIME_TO_TYPE.get(cleanMime);
     if (typeByMime) return typeByMime;
   }
@@ -379,7 +371,7 @@ export function isExtensionAllowedForCanonical(
  * Checks whether a MIME type is permitted for a canonical type.
  */
 export function isMimeAllowedForCanonical(canonical: CanonicalFileType, rawMime: string): boolean {
-  const cleanMime = rawMime.split(';')[0]?.trim().toLowerCase() ?? '';
+  const cleanMime = rawMime.split(';')[0]!.trim().toLowerCase();
   const def = CANONICAL_TYPE_DEFINITIONS[canonical];
   return def.mimeTypes.includes(cleanMime);
 }
@@ -393,12 +385,12 @@ export function areTypesCompatible(typeA?: CanonicalFileType, typeB?: CanonicalF
   if (typeA === typeB) return true;
 
   const defA = CANONICAL_TYPE_DEFINITIONS[typeA];
-  if (defA.compatibleTypes?.includes(typeB) || defA.containerType === typeB) {
+  if (defA.containerType === typeB || defA.compatibleTypes?.includes(typeB)) {
     return true;
   }
 
   const defB = CANONICAL_TYPE_DEFINITIONS[typeB];
-  if (defB.compatibleTypes?.includes(typeA) || defB.containerType === typeA) {
+  if (defB.containerType === typeA || defB.compatibleTypes?.includes(typeA)) {
     return true;
   }
 
