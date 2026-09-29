@@ -58,7 +58,7 @@ export class ScannerWorker {
     this.db = options.db;
     this.storageProvider = options.storageProvider;
     this.workerId = options.workerId ?? generateWorkerId();
-    this.leaseTimeoutMs = options.leaseTimeoutMs ?? 300_000;
+    this.leaseTimeoutMs = options.leaseTimeoutMs ?? 240_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
     this.tempDir =
       options.tempDir ??

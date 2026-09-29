@@ -233,20 +233,27 @@ The reaper runs periodically or on schedule:
 
 ## 7. Killed Worker Recovery Evidence
 
-The canonical P13 DoD requires that a killed worker's job is detected and re-queued by the reaper within 5 minutes ($300,000\text{ ms}$).
+The canonical P13 DoD requires that a killed worker's job is detected and re-queued by the reaper within 5 minutes ($300,000\text{ ms}$ / 300 seconds).
 
-### Configuration Distinction: Test vs. Production
+### Configuration Distinction: Production vs. Test
 
-- **Production / Default Configuration**:
-  - Worker Lease Duration: `300,000 ms` (5 minutes default).
-  - Reaper Sweep Interval: Configurable periodic background job (e.g. 10s–30s interval).
-  - SLA: Any crashed/terminated worker lease is detected and re-queued within 5 minutes.
-- **Test Suite Configuration (`tests/integration/scanner/p13-concurrency.test.ts` — `P13-07 & P13-08`)**:
-  - Fast deterministic test lease: `200 ms`.
-  - Direct reaper execution immediately following lease expiration.
-  - Captures actual millisecond-precision wall-clock timestamps ($T_1$ through $T_5$) and calculates exact requeue latency ($T_4 - T_2$) and recovery latency ($T_5 - T_2$).
+#### Production / Default Configuration
 
-### Measured Recovery Timeline
+- **Worker Lease Duration**: `240,000 ms` (240 seconds / 4 minutes).
+- **Maximum Reaper Detection Interval**: `30,000 ms` (30 seconds).
+- **Worst-Case Recovery Bound**:
+  $$\text{Worst-Case Recovery Bound} = \text{lease duration} + \text{maximum reaper detection interval} = 240\text{s} + 30\text{s} = \mathbf{270\text{ seconds}} \le 300\text{ seconds}$$
+- **Safety Margin**: A 30-second deterministic buffer guarantees that even in the absolute worst-case timing alignment (where a worker crashes 1 millisecond after a reaper sweep begins), the subsequent sweep detects and re-queues the job at second 270, strictly honoring the canonical 5-minute ($300\text{s}$) SLA.
+
+#### Test Suite Configuration (`tests/integration/scanner/p13-concurrency.test.ts` — `P13-07 & P13-08`)
+
+- **Fast Deterministic Test Lease**: `200 ms`.
+- **Immediate Reaper Execution**: Triggered following lease expiration ($T > 200\text{ ms}$).
+- **Measured Requeue Latency**: `258 ms`.
+- **Measured Recovery Latency**: `262 ms`.
+- _Note_: The test suite uses accelerated millisecond leases ($200\text{ ms}$) to verify the state transitions and timer arithmetic without pausing CI for minutes; the production system uses the 240s lease + 30s reaper interval to guarantee the 270s $\le$ 300s bound.
+
+### Measured Recovery Timeline (Test Execution)
 
 | Event / Marker           | Description                                                     | Timestamp (ISO 8601 UTC)   | Elapsed / Latency |
 | ------------------------ | --------------------------------------------------------------- | -------------------------- | ----------------: |
@@ -399,7 +406,15 @@ All 20 dedicated P13 tests across 3 suites pass with 100% reliability:
 
 All canonical requirements for Phase P13 are satisfied and empirically validated:
 
-- Requeue timing after worker crash was measured at **258 ms**, well below the canonical 5-minute maximum.
+- **Production Configuration Recovery Bound**:
+  - Lease duration = `240s`
+  - Maximum reaper detection interval = `30s`
+  - Worst-case recovery bound: $\text{lease} + \text{interval} = 240\text{s} + 30\text{s} = \mathbf{270\text{ seconds}} \le 300\text{ seconds}$ (5 minutes)
+- **Accelerated Test Suite Verification**:
+  - Test lease = `200 ms`
+  - Immediate reaper sweep
+  - Measured requeue latency = `258 ms`
+  - Measured recovery latency = `262 ms`
 - All 20 P13 tests and 510 legacy regression tests pass (530/530 total).
 - Phase numbering strictly follows the canonical P14–P39 roadmap.
 - VersionId security claims reflect technically precise boundaries.

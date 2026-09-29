@@ -321,7 +321,7 @@ export async function reapExpiredJobs(
   options: ReaperOptions = {},
 ): Promise<ReaperResult> {
   const now = options.now ? options.now() : new Date();
-  const leaseTimeoutMs = options.leaseTimeoutMs ?? 300_000; // 5 minutes default
+  const leaseTimeoutMs = options.leaseTimeoutMs ?? 240_000; // 240 seconds (4 minutes) default
   const batchSize = options.batchSize ?? 100;
   const baseBackoffMs = options.baseBackoffMs ?? 1000;
   const maxBackoffMs = options.maxBackoffMs ?? 60_000;
