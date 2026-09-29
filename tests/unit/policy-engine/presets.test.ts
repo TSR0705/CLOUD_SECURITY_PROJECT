@@ -12,34 +12,44 @@ describe('Policy Presets', () => {
   it('images-only preset satisfies sug.policy/v1 and is immutable', () => {
     const preset = createImagesOnlyPreset();
     expect(parsePolicyDocument(preset)).toEqual(preset);
+    expect(preset.schema).toBe('sug.policy/v1');
     expect(preset.name).toBe('images-only');
     expect(preset.maxFileSize).toBe(10 * 1024 * 1024);
     expect(preset.allowedExtensions).toContain('.jpg');
     expect(preset.allowedExtensions).toContain('.png');
-    expect(preset.allowArchives).toBe(false);
+    expect(preset.archiveAllowed).toBe(false);
+    expect(preset.image.maxPixels).toBe(25_000_000);
+    expect(preset.requiredChecks).toContain('image.format');
     expect(Object.isFrozen(preset)).toBe(true);
   });
 
   it('documents preset satisfies sug.policy/v1 and is immutable', () => {
     const preset = createDocumentsPreset();
     expect(parsePolicyDocument(preset)).toEqual(preset);
+    expect(preset.schema).toBe('sug.policy/v1');
     expect(preset.name).toBe('documents');
     expect(preset.maxFileSize).toBe(25 * 1024 * 1024);
     expect(preset.allowedExtensions).toContain('.pdf');
     expect(preset.allowedExtensions).toContain('.docx');
-    expect(preset.allowArchives).toBe(false);
+    expect(preset.archiveAllowed).toBe(false);
+    expect(preset.pdf.allowActiveContent).toBe(false);
+    expect(preset.office.allowMacros).toBe(false);
+    expect(preset.requiredChecks).toContain('pdf.active_content');
     expect(Object.isFrozen(preset)).toBe(true);
   });
 
   it('archives-strict preset satisfies sug.policy/v1 and is immutable', () => {
     const preset = createArchivesStrictPreset();
     expect(parsePolicyDocument(preset)).toEqual(preset);
+    expect(preset.schema).toBe('sug.policy/v1');
     expect(preset.name).toBe('archives-strict');
     expect(preset.maxFileSize).toBe(50 * 1024 * 1024);
     expect(preset.allowedExtensions).toContain('.zip');
-    expect(preset.allowArchives).toBe(true);
-    expect(preset.maxArchiveDepth).toBe(2);
-    expect(preset.maxArchiveFiles).toBe(100);
+    expect(preset.archiveAllowed).toBe(true);
+    expect(preset.archive.maxDepth).toBe(2);
+    expect(preset.archive.maxEntries).toBe(100);
+    expect(preset.archive.maxRatio).toBe(20);
+    expect(preset.requiredChecks).toContain('archive.bomb');
     expect(Object.isFrozen(preset)).toBe(true);
   });
 

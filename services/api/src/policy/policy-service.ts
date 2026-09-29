@@ -22,7 +22,7 @@ export interface PolicyResponse {
   id: string;
   applicationId: string;
   version: number;
-  schemaVersion: string;
+  schema: string;
   document: PolicyDocument;
   documentSha256: string;
   isActive: boolean;
@@ -119,11 +119,14 @@ export class PolicyService {
 
     const isActive = activePolicyId ? row.id === activePolicyId : row.id === row.active_policy_id;
 
+    const schema =
+      doc.schema ?? (doc as unknown as { schemaVersion?: string }).schemaVersion ?? 'sug.policy/v1';
+
     return {
       id: row.id,
       applicationId: row.application_id,
       version: Number(row.version),
-      schemaVersion: doc.schemaVersion ?? 'sug.policy/v1',
+      schema,
       document: doc,
       documentSha256,
       isActive: Boolean(isActive),

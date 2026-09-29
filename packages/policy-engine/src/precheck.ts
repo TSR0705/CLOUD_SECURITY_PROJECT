@@ -190,7 +190,8 @@ export function precheck(policy: PolicyDocument, file: PrecheckFileInput): Prech
   }
 
   // 6. MIME and extension consistency check
-  if (policy.requireMimeMatch) {
+  const shouldCheckTypeConsistency = policy.requiredChecks.includes('type.consistency');
+  if (shouldCheckTypeConsistency) {
     const expectedMimes = CANONICAL_MIME_MAP[norm.extension];
     if (expectedMimes && !expectedMimes.has(declaredMime)) {
       return {
@@ -203,7 +204,7 @@ export function precheck(policy: PolicyDocument, file: PrecheckFileInput): Prech
   }
 
   // 7. Archive permission check
-  if (!policy.allowArchives && ARCHIVE_EXTENSIONS.has(norm.extension)) {
+  if (!policy.archiveAllowed && ARCHIVE_EXTENSIONS.has(norm.extension)) {
     return {
       allowed: false,
       code: 'ARCHIVE_FORBIDDEN',

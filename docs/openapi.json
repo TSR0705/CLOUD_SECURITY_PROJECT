@@ -1165,7 +1165,7 @@
                       "type": "integer",
                       "example": 1
                     },
-                    "schemaVersion": {
+                    "schema": {
                       "type": "string",
                       "example": "sug.policy/v1"
                     },
@@ -1190,7 +1190,7 @@
                     "id",
                     "applicationId",
                     "version",
-                    "schemaVersion",
+                    "schema",
                     "document",
                     "documentSha256",
                     "isActive",
@@ -1362,7 +1362,7 @@
                       "type": "integer",
                       "example": 1
                     },
-                    "schemaVersion": {
+                    "schema": {
                       "type": "string",
                       "example": "sug.policy/v1"
                     },
@@ -1387,7 +1387,7 @@
                     "id",
                     "applicationId",
                     "version",
-                    "schemaVersion",
+                    "schema",
                     "document",
                     "documentSha256",
                     "isActive",
@@ -1519,7 +1519,7 @@
                       "type": "integer",
                       "example": 1
                     },
-                    "schemaVersion": {
+                    "schema": {
                       "type": "string",
                       "example": "sug.policy/v1"
                     },
@@ -1544,7 +1544,7 @@
                     "id",
                     "applicationId",
                     "version",
-                    "schemaVersion",
+                    "schema",
                     "document",
                     "documentSha256",
                     "isActive",

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { toCanonicalJson, computePolicyHash, computePolicyHashHex } from '@sug/policy-engine';
+import {
+  toCanonicalJson,
+  computePolicyHash,
+  computePolicyHashHex,
+  createDocumentsPreset,
+  createArchivesStrictPreset,
+} from '@sug/policy-engine';
 
 describe('Canonical JSON and Policy Hashing', () => {
   it('sorts keys recursively in alphabetical order', () => {
@@ -19,21 +25,49 @@ describe('Canonical JSON and Policy Hashing', () => {
     expect(toCanonicalJson(objA)).toBe('{"a":[{"x":1,"y":2}],"b":{"c":3,"d":4},"z":1}');
   });
 
-  it('produces identical SHA-256 hashes regardless of initial key order', () => {
+  it('produces identical SHA-256 hashes regardless of initial top-level and nested key order', () => {
     const policyDoc1 = {
-      schemaVersion: 'sug.policy/v1',
+      schema: 'sug.policy/v1',
       name: 'canonical-test',
       maxFileSize: 5000000,
       allowedExtensions: ['.pdf'],
       allowedMimeTypes: ['application/pdf'],
+      archive: {
+        maxRatio: 10,
+        maxDepth: 2,
+        maxCompressedSize: 5000000,
+        maxUncompressedSize: 10000000,
+        maxEntries: 100,
+        maxExtractionMs: 5000,
+        maxMemoryBytes: 67108864,
+      },
+      pdf: {
+        allowActiveContent: false,
+        allowEncrypted: false,
+        allowEmbeddedFiles: false,
+      },
     };
 
     const policyDoc2 = {
+      pdf: {
+        allowEmbeddedFiles: false,
+        allowActiveContent: false,
+        allowEncrypted: false,
+      },
       allowedMimeTypes: ['application/pdf'],
+      archive: {
+        maxMemoryBytes: 67108864,
+        maxExtractionMs: 5000,
+        maxEntries: 100,
+        maxUncompressedSize: 10000000,
+        maxCompressedSize: 5000000,
+        maxDepth: 2,
+        maxRatio: 10,
+      },
       name: 'canonical-test',
       allowedExtensions: ['.pdf'],
       maxFileSize: 5000000,
-      schemaVersion: 'sug.policy/v1',
+      schema: 'sug.policy/v1',
     };
 
     const hash1 = computePolicyHashHex(toCanonicalJson(policyDoc1));
@@ -51,12 +85,12 @@ describe('Canonical JSON and Policy Hashing', () => {
 
   it('produces different hashes when policy contents differ', () => {
     const policyA = {
-      schemaVersion: 'sug.policy/v1',
+      schema: 'sug.policy/v1',
       name: 'policy-a',
       maxFileSize: 5000000,
     };
     const policyB = {
-      schemaVersion: 'sug.policy/v1',
+      schema: 'sug.policy/v1',
       name: 'policy-b',
       maxFileSize: 5000000,
     };
@@ -65,6 +99,74 @@ describe('Canonical JSON and Policy Hashing', () => {
     const hashB = computePolicyHashHex(toCanonicalJson(policyB));
 
     expect(hashA).not.toBe(hashB);
+  });
+
+  it('produces a different hash when security-relevant nested archive.maxRatio changes', () => {
+    const base = createArchivesStrictPreset();
+    const modified = {
+      ...base,
+      archive: {
+        ...base.archive,
+        maxRatio: base.archive.maxRatio + 5,
+      },
+    };
+
+    const hashBase = computePolicyHashHex(toCanonicalJson(base));
+    const hashModified = computePolicyHashHex(toCanonicalJson(modified));
+
+    expect(hashBase).not.toBe(hashModified);
+  });
+
+  it('produces a different hash when security-relevant nested pdf or office permissions change', () => {
+    const base = createDocumentsPreset();
+    const withActiveContent = {
+      ...base,
+      pdf: {
+        ...base.pdf,
+        allowActiveContent: true,
+      },
+    };
+    const withMacros = {
+      ...base,
+      office: {
+        ...base.office,
+        allowMacros: true,
+      },
+    };
+
+    const hashBase = computePolicyHashHex(toCanonicalJson(base));
+    const hashActive = computePolicyHashHex(toCanonicalJson(withActiveContent));
+    const hashMacros = computePolicyHashHex(toCanonicalJson(withMacros));
+
+    expect(hashBase).not.toBe(hashActive);
+    expect(hashBase).not.toBe(hashMacros);
+    expect(hashActive).not.toBe(hashMacros);
+  });
+
+  it('produces a different hash when requiredChecks list changes', () => {
+    const base = createDocumentsPreset();
+    const modifiedChecks = {
+      ...base,
+      requiredChecks: base.requiredChecks.filter((c) => c !== 'polyglot.basic'),
+    };
+
+    const hashBase = computePolicyHashHex(toCanonicalJson(base));
+    const hashModified = computePolicyHashHex(toCanonicalJson(modifiedChecks));
+
+    expect(hashBase).not.toBe(hashModified);
+  });
+
+  it('produces a different hash when onSuspicious action changes', () => {
+    const base = createDocumentsPreset();
+    const modified = {
+      ...base,
+      onSuspicious: 'BLOCK' as const,
+    };
+
+    const hashBase = computePolicyHashHex(toCanonicalJson(base));
+    const hashModified = computePolicyHashHex(toCanonicalJson(modified));
+
+    expect(hashBase).not.toBe(hashModified);
   });
 
   it('strips undefined properties consistently', () => {

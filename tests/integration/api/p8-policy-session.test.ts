@@ -107,12 +107,11 @@ describe('Phase P8: Policy Engine and Upload Session (DoD Test Suite)', () => {
     it('creates a policy with un-ordered keys and stores deterministic SHA-256 identity', async () => {
       // Document with arbitrary key ordering
       const rawPolicyDoc = {
-        requireMimeMatch: true,
         allowedMimeTypes: ['image/jpeg', 'image/png'],
         name: 'unordered-policy',
         maxFileSize: 5 * 1024 * 1024,
         allowedExtensions: ['.jpg', '.jpeg', '.png'],
-        schemaVersion: 'sug.policy/v1',
+        schema: 'sug.policy/v1',
       };
 
       const expectedCanonical = toCanonicalJson(parsePolicyDocument(rawPolicyDoc));
@@ -132,7 +131,7 @@ describe('Phase P8: Policy Engine and Upload Session (DoD Test Suite)', () => {
       expect(body.id).toBeDefined();
       expect(body.applicationId).toBe(appAId);
       expect(body.version).toBe(1);
-      expect(body.schemaVersion).toBe('sug.policy/v1');
+      expect(body.schema).toBe('sug.policy/v1');
       expect(body.documentSha256).toBe(expectedHash);
       expect(body.isActive).toBe(true);
 
@@ -144,9 +143,9 @@ describe('Phase P8: Policy Engine and Upload Session (DoD Test Suite)', () => {
       expect(dbRow.rows[0].document_sha256.toString('hex')).toBe(expectedHash);
     });
 
-    it('rejects policy creation when schemaVersion is invalid or unsupported', async () => {
+    it('rejects policy creation when schema is invalid or unsupported', async () => {
       const invalidVersionDoc = {
-        schemaVersion: 'sug.policy/v2', // Invalid version
+        schema: 'sug.policy/v2', // Invalid version
         name: 'bad-version',
         maxFileSize: 1024 * 1024,
         allowedExtensions: ['.pdf'],
@@ -164,9 +163,29 @@ describe('Phase P8: Policy Engine and Upload Session (DoD Test Suite)', () => {
       expect(res.json().type).toBe('urn:sug:error:validation');
     });
 
+    it('rejects policy creation when legacy schemaVersion is used instead of schema', async () => {
+      const legacyDoc = {
+        schemaVersion: 'sug.policy/v1', // Non-canonical field
+        name: 'legacy-schema-version',
+        maxFileSize: 1024 * 1024,
+        allowedExtensions: ['.pdf'],
+        allowedMimeTypes: ['application/pdf'],
+      };
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/policies',
+        headers: { authorization: `Bearer ${apiKeyARaw}` },
+        payload: legacyDoc,
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().detail).toMatch(/Unrecognized key|Invalid/i);
+    });
+
     it('rejects policy creation with unknown injected properties (.strict())', async () => {
       const injectedDoc = {
-        schemaVersion: 'sug.policy/v1',
+        schema: 'sug.policy/v1',
         name: 'injected-keys',
         maxFileSize: 1024 * 1024,
         allowedExtensions: ['.pdf'],
@@ -179,6 +198,32 @@ describe('Phase P8: Policy Engine and Upload Session (DoD Test Suite)', () => {
         url: '/api/v1/policies',
         headers: { authorization: `Bearer ${apiKeyARaw}` },
         payload: injectedDoc,
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().detail).toMatch(/Unrecognized key/i);
+    });
+
+    it('rejects policy creation with unknown nested property in pdf or archive block (.strict())', async () => {
+      const injectedNested = {
+        schema: 'sug.policy/v1',
+        name: 'injected-nested',
+        maxFileSize: 1024 * 1024,
+        allowedExtensions: ['.pdf'],
+        allowedMimeTypes: ['application/pdf'],
+        pdf: {
+          allowActiveContent: false,
+          allowEncrypted: false,
+          allowEmbeddedFiles: false,
+          allowScriptExecution: true, // Unknown property
+        },
+      };
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/policies',
+        headers: { authorization: `Bearer ${apiKeyARaw}` },
+        payload: injectedNested,
       });
 
       expect(res.statusCode).toBe(400);
@@ -266,6 +311,7 @@ describe('Phase P8: Policy Engine and Upload Session (DoD Test Suite)', () => {
       expect(v2Body.id).not.toBe(policyV1Id); // Brand new immutable row!
       expect(v2Body.version).toBeGreaterThan(1);
       expect(v2Body.isActive).toBe(true);
+      expect(v2Body.documentSha256).not.toBe(policyV1Hash);
 
       // Verify v1 in DB was NOT mutated
       const v1Row = await adminPool.query(

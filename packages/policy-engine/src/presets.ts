@@ -6,7 +6,7 @@ import { PolicyDocumentSchema, type PolicyDocument } from './schema.js';
  */
 export function createImagesOnlyPreset(): Readonly<PolicyDocument> {
   const doc = PolicyDocumentSchema.parse({
-    schemaVersion: 'sug.policy/v1',
+    schema: 'sug.policy/v1',
     name: 'images-only',
     description: 'Strict image upload policy for JPEG, PNG, WebP, and GIF files up to 10 MB',
     maxFileSize: 10 * 1024 * 1024, // 10 MB
@@ -25,10 +25,48 @@ export function createImagesOnlyPreset(): Readonly<PolicyDocument> {
       '.gz',
     ],
     blockedMimeTypes: ['application/x-executable', 'application/x-msdownload', 'application/zip'],
-    requireMimeMatch: true,
-    allowArchives: false,
-    maxArchiveDepth: 0,
-    maxArchiveFiles: 0,
+    scanRequired: true,
+    requiredChecks: [
+      'filename.safe',
+      'extension.allowed',
+      'magic.detect',
+      'type.consistency',
+      'size.limit',
+      'clamav.instream',
+      'yara.rules',
+      'polyglot.basic',
+      'image.format',
+    ],
+    archiveAllowed: false,
+    archive: {
+      maxCompressedSize: 10 * 1024 * 1024,
+      maxUncompressedSize: 10 * 1024 * 1024,
+      maxEntries: 1,
+      maxDepth: 1,
+      maxRatio: 1,
+      maxExtractionMs: 1000,
+      maxMemoryBytes: 32 * 1024 * 1024,
+    },
+    pdf: {
+      allowActiveContent: false,
+      allowEncrypted: false,
+      allowEmbeddedFiles: false,
+    },
+    office: {
+      allowMacros: false,
+    },
+    image: {
+      maxPixels: 25_000_000,
+      reencode: false,
+    },
+    cdrRequired: false,
+    onSuspicious: 'QUARANTINE',
+    manualReviewThreshold: 50,
+    scanTimeoutMs: 30000,
+    retention: {
+      quarantineDays: 7,
+    },
+    replicate: true,
   });
   return Object.freeze(doc);
 }
@@ -39,7 +77,7 @@ export function createImagesOnlyPreset(): Readonly<PolicyDocument> {
  */
 export function createDocumentsPreset(): Readonly<PolicyDocument> {
   const doc = PolicyDocumentSchema.parse({
-    schemaVersion: 'sug.policy/v1',
+    schema: 'sug.policy/v1',
     name: 'documents',
     description: 'Standard business documents (PDF, TXT, CSV, DOCX, XLSX) up to 25 MB',
     maxFileSize: 25 * 1024 * 1024, // 25 MB
@@ -64,21 +102,62 @@ export function createDocumentsPreset(): Readonly<PolicyDocument> {
       '.gz',
     ],
     blockedMimeTypes: ['application/x-executable', 'application/x-msdownload', 'application/zip'],
-    requireMimeMatch: true,
-    allowArchives: false,
-    maxArchiveDepth: 0,
-    maxArchiveFiles: 0,
+    scanRequired: true,
+    requiredChecks: [
+      'filename.safe',
+      'extension.allowed',
+      'magic.detect',
+      'type.consistency',
+      'size.limit',
+      'clamav.instream',
+      'yara.rules',
+      'polyglot.basic',
+      'pdf.active_content',
+      'pdf.encrypted',
+      'pdf.embedded',
+      'office.macros',
+    ],
+    archiveAllowed: false,
+    archive: {
+      maxCompressedSize: 25 * 1024 * 1024,
+      maxUncompressedSize: 25 * 1024 * 1024,
+      maxEntries: 1,
+      maxDepth: 1,
+      maxRatio: 1,
+      maxExtractionMs: 1000,
+      maxMemoryBytes: 32 * 1024 * 1024,
+    },
+    pdf: {
+      allowActiveContent: false,
+      allowEncrypted: false,
+      allowEmbeddedFiles: false,
+    },
+    office: {
+      allowMacros: false,
+    },
+    image: {
+      maxPixels: 25_000_000,
+      reencode: false,
+    },
+    cdrRequired: false,
+    onSuspicious: 'QUARANTINE',
+    manualReviewThreshold: 50,
+    scanTimeoutMs: 30000,
+    retention: {
+      quarantineDays: 7,
+    },
+    replicate: true,
   });
   return Object.freeze(doc);
 }
 
 /**
  * Immutable factory for the canonical 'archives-strict' policy preset.
- * Permits ZIP, TAR, GZ up to 50 MB with strictly bounded recursion depth (2) and file count (100).
+ * Permits ZIP, TAR, GZ up to 50 MB with strictly bounded recursion depth (2) and entry count (100).
  */
 export function createArchivesStrictPreset(): Readonly<PolicyDocument> {
   const doc = PolicyDocumentSchema.parse({
-    schemaVersion: 'sug.policy/v1',
+    schema: 'sug.policy/v1',
     name: 'archives-strict',
     description: 'Strict compressed archives policy with bounded depth and file counts up to 50 MB',
     maxFileSize: 50 * 1024 * 1024, // 50 MB
@@ -86,10 +165,50 @@ export function createArchivesStrictPreset(): Readonly<PolicyDocument> {
     allowedMimeTypes: ['application/zip', 'application/x-tar', 'application/gzip'],
     blockedExtensions: ['.exe', '.sh', '.bat', '.cmd', '.js', '.vbs', '.ps1'],
     blockedMimeTypes: ['application/x-executable', 'application/x-msdownload'],
-    requireMimeMatch: true,
-    allowArchives: true,
-    maxArchiveDepth: 2,
-    maxArchiveFiles: 100,
+    scanRequired: true,
+    requiredChecks: [
+      'filename.safe',
+      'extension.allowed',
+      'magic.detect',
+      'type.consistency',
+      'size.limit',
+      'clamav.instream',
+      'yara.rules',
+      'polyglot.basic',
+      'archive.bomb',
+      'archive.traversal',
+      'archive.integrity',
+    ],
+    archiveAllowed: true,
+    archive: {
+      maxCompressedSize: 50 * 1024 * 1024,
+      maxUncompressedSize: 100 * 1024 * 1024,
+      maxEntries: 100,
+      maxDepth: 2,
+      maxRatio: 20,
+      maxExtractionMs: 10000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+    },
+    pdf: {
+      allowActiveContent: false,
+      allowEncrypted: false,
+      allowEmbeddedFiles: false,
+    },
+    office: {
+      allowMacros: false,
+    },
+    image: {
+      maxPixels: 25_000_000,
+      reencode: false,
+    },
+    cdrRequired: false,
+    onSuspicious: 'QUARANTINE',
+    manualReviewThreshold: 50,
+    scanTimeoutMs: 30000,
+    retention: {
+      quarantineDays: 7,
+    },
+    replicate: true,
   });
   return Object.freeze(doc);
 }
