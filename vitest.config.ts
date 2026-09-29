@@ -8,7 +8,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@sug/shared/config': path.resolve(__dirname, 'packages/shared/src/config.ts'),
+      '@sug/shared/jobs': path.resolve(__dirname, 'packages/shared/src/jobs.ts'),
       '@sug/shared': path.resolve(__dirname, 'packages/shared/src/index.ts'),
+      '@sug/service-scanner': path.resolve(__dirname, 'services/scanner/src/index.ts'),
       '@sug/audit': path.resolve(__dirname, 'packages/audit/src/index.ts'),
       '@sug/storage': path.resolve(__dirname, 'packages/storage/src/index.ts'),
       '@sug/policy-engine': path.resolve(__dirname, 'packages/policy-engine/src/index.ts'),

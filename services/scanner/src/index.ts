@@ -14,3 +14,5 @@ export const Service_ScannerInfo: Service_ScannerInfo = {
   name: Service_ScannerPackageName,
   version: '0.1.0',
 };
+
+export * from './worker.js';
