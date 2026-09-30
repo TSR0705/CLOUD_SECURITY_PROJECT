@@ -17,7 +17,8 @@
     "db:migrate": "node scripts/migrate.mjs up",
     "db:rollback": "node scripts/migrate.mjs down",
     "db:create": "node scripts/migrate.mjs create",
-    "db:types": "kysely-codegen --out-file packages/shared/src/db.ts --dialect postgres"
+    "db:types": "kysely-codegen --out-file packages/shared/src/db.ts --dialect postgres",
+    "rules:validate": "node scripts/validate-yara-rules.mjs packages/scanner/rules"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1138.0",

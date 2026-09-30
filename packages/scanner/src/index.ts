@@ -16,5 +16,6 @@ export const ScannerInfo: ScannerInfo = {
 };
 
 export * from './clamav.js';
+export * from './yara.js';
 export * from './metrics.js';
 export { Registry, Gauge } from '@prometheus-io/client';

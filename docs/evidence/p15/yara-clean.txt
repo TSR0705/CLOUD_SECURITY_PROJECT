@@ -1,0 +1,11 @@
+=== P15 CLEAN BENIGN SCAN EVIDENCE ===
+Command: yr scan --output-format ndjson --timeout 30 --print-meta packages/scanner/rules clean-sample.txt
+Exit Code: 0
+STDOUT (NDJSON):
+{"path":"clean-sample.txt","rules":[]}
+Parsed JSON:
+{
+  "path": "clean-sample.txt",
+  "rules": []
+}
+Result Status: CLEAN (rules matched: 0)

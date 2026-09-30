@@ -1,0 +1,28 @@
+=== P15 INVALID RULE SYNTAX BUILD/VALIDATION GATE EVIDENCE ===
+1. Direct yr compile Execution against Deliberately Invalid Fixture:
+   Command: yr compile tests/fixtures/yara/invalid/syntax_error.yar -o temp_invalid.yarc
+   Exit Code: 1
+   STDERR:
+error[E001]: syntax error
+ --> tests/fixtures/yara/invalid/syntax_error.yar:7:8
+  |
+7 |     $a AND invalid syntax token here
+  |        ^^^ expecting `at`, `in`, operator or `}`, found `AND`
+error: 1 error(s) found
+
+2. Validation Gate Execution (scripts/validate-yara-rules.mjs):
+   Command: node scripts/validate-yara-rules.mjs tests/fixtures/yara/invalid
+   Exit Code: 1
+   STDERR:
+[ERROR] YARA-X Rule Validation Failed: YARA-X compilation failed (exit code 1):
+error[E001]: syntax error
+ --> C:\Users\ACER\Desktop\CLOUD_SECURITY_PROJECT\tests\fixtures\yara\invalid\syntax_error.yar:7:8
+  |
+7 |     $a AND invalid syntax token here
+  |        ^^^ expecting `at`, `in`, operator or `}`, found `AND`
+error: 1 error(s) found
+
+3. Definition of Done Evaluation:
+   - Invalid rule causes compilation failure: YES (exit code 1)
+   - Build/validation gate fails non-zero: YES (exit code 1)
+   - Prevents malformed rules from entering production: YES

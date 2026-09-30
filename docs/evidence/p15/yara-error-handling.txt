@@ -1,0 +1,25 @@
+=== P15 YARA-X FAIL-CLOSED ERROR HANDLING EVIDENCE ===
+Demonstration that all abnormal, failure, and edge conditions evaluate to ERROR and NEVER CLEAN.
+
+1. Missing YARA-X Binary:
+   Status: ERROR (Expected: ERROR)
+   Error: YARA-X process error (yr_non_existent_binary_xyz): spawn yr_non_existent_binary_xyz ENOENT
+
+2. Missing Target Artifact File:
+   Status: ERROR (Expected: ERROR)
+   Error: Target artifact file does not exist: non_existent_target_file_12345.bin
+
+3. Missing Rules Directory:
+   Status: ERROR (Expected: ERROR)
+   Error: YARA-X rules path does not exist: non_existent_rules_dir_xyz
+
+4. Malformed NDJSON Stream Output:
+   Status: ERROR (Expected: ERROR)
+   Error: Malformed NDJSON line emitted by YARA-X: {"path":"file.bin", malformed json stream}
+
+5. Matched Rule with Invalid/Missing Metadata:
+   Status: ERROR (Expected: ERROR)
+   Error: Rule 'BadMetaRule' has invalid metadata: Invalid or missing mandatory metadata 'severity': 'INVALID_SEVERITY'. Allowed: low, medium, high, critical, info
+
+Summary:
+  Fail-closed guarantee verified: All 5 failure scenarios evaluate to ERROR and NEVER CLEAN.

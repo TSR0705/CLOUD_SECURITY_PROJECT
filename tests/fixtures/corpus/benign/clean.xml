@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration xmlns="https://sug.internal/config/v1">
+    <environment name="production">
+        <maxConcurrency>16</maxConcurrency>
+        <timeoutSeconds>30</timeoutSeconds>
+    </environment>
+</configuration>

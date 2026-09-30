@@ -1,0 +1,13 @@
+{
+  "system": "Secure Upload Gateway",
+  "status": "OPERATIONAL",
+  "audit": {
+    "enabled": true,
+    "logLevel": "INFO",
+    "retentionDays": 90
+  },
+  "metrics": {
+    "requestsTotal": 1420,
+    "errorRate": 0.001
+  }
+}

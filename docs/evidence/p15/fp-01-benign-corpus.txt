@@ -1,0 +1,17 @@
+=== P15 FP-01 BENIGN CORPUS FALSE-POSITIVE GATE EVIDENCE ===
+Target Corpus: tests/fixtures/corpus/benign
+Files Evaluated: 6
+Rules Directory: packages/scanner/rules
+
+Per-File Verification:
+  - File: clean.csv | Matches: 0 | Status: CLEAN (PASS)
+  - File: clean.json | Matches: 0 | Status: CLEAN (PASS)
+  - File: clean.pdf | Matches: 0 | Status: CLEAN (PASS)
+  - File: clean.png | Matches: 0 | Status: CLEAN (PASS)
+  - File: clean.txt | Matches: 0 | Status: CLEAN (PASS)
+  - File: clean.xml | Matches: 0 | Status: CLEAN (PASS)
+
+Summary:
+  Total Benign Files Scanned: 6
+  Total False Positives: 0
+  fp-01 Gate Result: PASS (0 false positives)

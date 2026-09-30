@@ -1,0 +1,28 @@
+=== P15 SCAN-03 DETERMINISTIC MATCH EVIDENCE ===
+Command: yr scan --output-format ndjson --timeout 30 --print-meta packages/scanner/rules scan-03-sample.bin
+Exit Code: 0
+STDOUT (NDJSON):
+{"path":"scan-03-sample.bin","rules":[{"identifier":"P15_Test_Malware_Signature","meta":[["description","Canonical P15 test malware pattern for scan-03"],["severity","critical"],["confidence","high"]]}]}
+Parsed JSON:
+{
+  "path": "scan-03-sample.bin",
+  "rules": [
+    {
+      "identifier": "P15_Test_Malware_Signature",
+      "meta": [
+        [
+          "description",
+          "Canonical P15 test malware pattern for scan-03"
+        ],
+        [
+          "severity",
+          "critical"
+        ],
+        [
+          "confidence",
+          "high"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+=== P15 MULTIPLE RULE MATCH EVIDENCE ===
+Command: yr scan --output-format ndjson --timeout 30 --print-meta packages/scanner/rules multi-sample.bin
+Exit Code: 0
+STDOUT (NDJSON):
+{"path":"multi-sample.bin","rules":[{"identifier":"P15_Secondary_Test_Signature","meta":[["description","Secondary test threat pattern for multiple match verification"],["severity","high"],["confidence","medium"]]},{"identifier":"P15_Test_Malware_Signature","meta":[["description","Canonical P15 test malware pattern for scan-03"],["severity","critical"],["confidence","high"]]}]}
+Parsed JSON:
+{
+  "path": "multi-sample.bin",
+  "rules": [
+    {
+      "identifier": "P15_Secondary_Test_Signature",
+      "meta": [
+        [
+          "description",
+          "Secondary test threat pattern for multiple match verification"
+        ],
+        [
+          "severity",
+          "high"
+        ],
+        [
+          "confidence",
+          "medium"
+        ]
+      ]
+    },
+    {
+      "identifier": "P15_Test_Malware_Signature",
+      "meta": [
+        [
+          "description",
+          "Canonical P15 test malware pattern for scan-03"
+        ],
+        [
+          "severity",
+          "critical"
+        ],
+        [
+          "confidence",
+          "high"
+        ]
+      ]
+    }
+  ]
+}
+Preserved Matches Count: 2
+Rule 1: P15_Test_Malware_Signature (severity: critical, confidence: high)
+Rule 2: P15_Secondary_Test_Signature (severity: high, confidence: medium)
