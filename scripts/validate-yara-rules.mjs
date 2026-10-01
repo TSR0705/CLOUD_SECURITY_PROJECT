@@ -22,7 +22,71 @@ import { spawnSync } from 'node:child_process';
 const ALLOWED_SEVERITY = new Set(['low', 'medium', 'high', 'critical', 'info']);
 const ALLOWED_CONFIDENCE = new Set(['low', 'medium', 'high', 'confirmed']);
 
-export function validateRulesDirectory(targetDir) {
+export function computeRulesContentSha256(targetDir) {
+  const resolvedDir = path.resolve(process.cwd(), targetDir);
+  const files = findRuleFiles(resolvedDir);
+  files.sort();
+
+  const hash = crypto.createHash('sha256');
+  for (const f of files) {
+    const rel = path.relative(resolvedDir, f).replace(/\\/g, '/');
+    hash.update(rel);
+    hash.update('\0');
+    hash.update(fs.readFileSync(f));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+export function generateRulesManifest(targetDir) {
+  const resolvedDir = path.resolve(process.cwd(), targetDir);
+  const contentSha256 = computeRulesContentSha256(resolvedDir);
+
+  let gitRevision = null;
+  let isClean = false;
+
+  try {
+    const gitDir = path.join(process.cwd(), '.git');
+    if (fs.existsSync(gitDir)) {
+      const status = spawnSync('git', ['status', '--porcelain', '--', resolvedDir], {
+        encoding: 'utf8',
+      });
+      const dirtyRuleFiles = (status.stdout || '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.endsWith('.yar') || l.endsWith('.yara'));
+      isClean = status.status === 0 && dirtyRuleFiles.length === 0;
+
+      const logRes = spawnSync('git', ['log', '-1', '--format=%H', '--', resolvedDir], {
+        encoding: 'utf8',
+      });
+      if (logRes.status === 0 && logRes.stdout) {
+        const sha = logRes.stdout.trim();
+        if (sha.length === 40) {
+          gitRevision = sha;
+        }
+      }
+    }
+  } catch {
+    // git inspection optional
+  }
+
+  // If clean git revision is available, signatureVersion is Git SHA; otherwise content SHA
+  const signatureVersion = gitRevision && isClean ? gitRevision : contentSha256;
+
+  const manifest = {
+    signatureVersion,
+    rulesGitRevision: gitRevision,
+    rulesContentSha256: contentSha256,
+    generatedAt: new Date().toISOString(),
+  };
+
+  const manifestPath = path.join(resolvedDir, 'rules_manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+  return manifest;
+}
+
+export function validateRulesDirectory(targetDir, options = { generateManifest: true }) {
   const resolvedDir = path.resolve(process.cwd(), targetDir);
   if (!fs.existsSync(resolvedDir)) {
     throw new Error(`Rules path does not exist: ${resolvedDir}`);
@@ -48,25 +112,16 @@ export function validateRulesDirectory(targetDir) {
       throw new Error(`YARA-X compilation failed (exit code ${compileRes.status}):\n${errMsg}`);
     }
 
-    // 2. Inspect rules metadata by scanning a dummy buffer using yr scan
-    const tempTarget = path.join(
-      os.tmpdir(),
-      `sug-dummy-target-${crypto.randomUUID().slice(0, 8)}.bin`,
-    );
-    try {
-      fs.writeFileSync(tempTarget, Buffer.alloc(0));
-      // Scan to trigger metadata enumeration or parse source files directly
-      // Inspect source files directly for mandatory metadata
-      validateRulesSourceFiles(resolvedDir);
-    } finally {
-      try {
-        fs.unlinkSync(tempTarget);
-      } catch {
-        // ignore
-      }
+    // 2. Inspect source files directly for mandatory metadata
+    validateRulesSourceFiles(resolvedDir);
+
+    // 3. Generate or update build-time rules_manifest.json if requested
+    let manifest = null;
+    if (options.generateManifest) {
+      manifest = generateRulesManifest(resolvedDir);
     }
 
-    return { success: true, path: resolvedDir };
+    return { success: true, path: resolvedDir, manifest };
   } finally {
     try {
       if (fs.existsSync(tempOutputFile)) {
@@ -151,10 +206,17 @@ function validateRulesSourceFiles(targetDir) {
 
 // CLI entry point
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
-  const target = process.argv[2] || 'packages/scanner/rules';
+  const args = process.argv.slice(2);
+  const noManifest = args.includes('--no-manifest');
+  const target = args.find((a) => !a.startsWith('--')) || 'packages/scanner/rules';
+
   try {
-    validateRulesDirectory(target);
-    console.log(`[OK] All YARA-X rules in '${target}' compiled and passed metadata validation.`);
+    const res = validateRulesDirectory(target, { generateManifest: !noManifest });
+    console.log(
+      `[OK] All YARA-X rules in '${target}' compiled and passed metadata validation.${
+        res.manifest ? ` Manifest generated (version: ${res.manifest.signatureVersion}).` : ''
+      }`,
+    );
     process.exit(0);
   } catch (err) {
     console.error(`[ERROR] YARA-X Rule Validation Failed: ${err.message}`);

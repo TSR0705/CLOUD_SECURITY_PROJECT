@@ -12,6 +12,7 @@ import {
   parseYaraNdjsonOutput,
   computeRulesDirectoryContentHash,
   resolveYaraSignatureVersion,
+  resolveYaraProvenance,
 } from '../../../packages/scanner/src/yara.js';
 
 describe('Phase P15: YARA-X Unit Test Suite', () => {
@@ -239,7 +240,7 @@ describe('Phase P15: YARA-X Unit Test Suite', () => {
   // ============================================================
   // 4. Signature Version Provenance & Content Hashing
   // ============================================================
-  describe('Signature Version Derivation', () => {
+  describe('Signature Version Derivation & Provenance', () => {
     let tempRulesDir: string;
 
     it('computes deterministic content tree hash across sorted rule files', () => {
@@ -269,18 +270,92 @@ describe('Phase P15: YARA-X Unit Test Suite', () => {
       fs.rmSync(tempRulesDir, { recursive: true, force: true });
     });
 
-    it('reads version from rules_manifest.json when present', () => {
+    it('guarantees same rules = same version, and changed rules = different version', () => {
+      tempRulesDir = path.join(os.tmpdir(), `sug-yara-version-diff-${crypto.randomUUID()}`);
+      fs.mkdirSync(tempRulesDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(tempRulesDir, 'rule1.yar'),
+        'rule Rule1 { meta: severity = "medium" confidence = "medium" condition: true }',
+      );
+
+      const ver1 = resolveYaraSignatureVersion(tempRulesDir);
+      const ver2 = resolveYaraSignatureVersion(tempRulesDir);
+      expect(ver1).toBe(ver2);
+
+      // Mutating rule content produces a different version
+      fs.writeFileSync(
+        path.join(tempRulesDir, 'rule1.yar'),
+        'rule Rule1 { meta: severity = "high" confidence = "high" condition: true }',
+      );
+
+      const ver3 = resolveYaraSignatureVersion(tempRulesDir);
+      expect(ver3).not.toBe(ver1);
+
+      fs.rmSync(tempRulesDir, { recursive: true, force: true });
+    });
+
+    it('resolves signature version from rules_manifest.json in container environments without .git', () => {
       tempRulesDir = path.join(os.tmpdir(), `sug-yara-manifest-test-${crypto.randomUUID()}`);
       fs.mkdirSync(tempRulesDir, { recursive: true });
 
-      const manifestVersion = 'e1a9c372f883b27d140e6983050119854721ab99';
+      const ruleFile = path.join(tempRulesDir, 'manifested.yar');
+      fs.writeFileSync(
+        ruleFile,
+        'rule ManifestedRule { meta: severity = "high" confidence = "high" condition: true }',
+      );
+      const contentSha = computeRulesDirectoryContentHash(tempRulesDir);
+
+      const bakedGitRevision = '262ebdac9c92cc61e1ce0b1c978793ae0267534f';
       fs.writeFileSync(
         path.join(tempRulesDir, 'rules_manifest.json'),
-        JSON.stringify({ version: manifestVersion }),
+        JSON.stringify({
+          signatureVersion: bakedGitRevision,
+          rulesGitRevision: bakedGitRevision,
+          rulesContentSha256: contentSha,
+          generatedAt: new Date().toISOString(),
+        }),
       );
 
+      // Verify resolution in a standalone directory where no .git exists
+      const provenance = resolveYaraProvenance(tempRulesDir);
+      expect(provenance.source).toBe('manifest');
+      expect(provenance.signatureVersion).toBe(bakedGitRevision);
+      expect(provenance.rulesGitRevision).toBe(bakedGitRevision);
+      expect(provenance.rulesContentSha256).toBe(contentSha);
+
       const version = resolveYaraSignatureVersion(tempRulesDir);
-      expect(version).toBe(manifestVersion);
+      expect(version).toBe(bakedGitRevision);
+
+      fs.rmSync(tempRulesDir, { recursive: true, force: true });
+    });
+
+    it('detects altered rule content when manifest is stale and produces updated content hash', () => {
+      tempRulesDir = path.join(os.tmpdir(), `sug-yara-stale-manifest-${crypto.randomUUID()}`);
+      fs.mkdirSync(tempRulesDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(tempRulesDir, 'rule.yar'),
+        'rule RuleOriginal { meta: severity = "low" confidence = "low" condition: true }',
+      );
+
+      // Write manifest with old content hash
+      fs.writeFileSync(
+        path.join(tempRulesDir, 'rules_manifest.json'),
+        JSON.stringify({
+          signatureVersion: 'old_git_sha_1234567890abcdef1234567890abcdef12345678',
+          rulesGitRevision: 'old_git_sha_1234567890abcdef1234567890abcdef12345678',
+          rulesContentSha256:
+            'stale_hash_0000000000000000000000000000000000000000000000000000000000000000',
+        }),
+      );
+
+      const provenance = resolveYaraProvenance(tempRulesDir);
+      // Because content changed from the stale manifest, it does NOT return the stale git revision
+      expect(provenance.signatureVersion).not.toBe(
+        'old_git_sha_1234567890abcdef1234567890abcdef12345678',
+      );
+      expect(provenance.rulesContentSha256).toBe(computeRulesDirectoryContentHash(tempRulesDir));
 
       fs.rmSync(tempRulesDir, { recursive: true, force: true });
     });

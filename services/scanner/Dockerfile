@@ -41,7 +41,8 @@ COPY services/scanner/package.json ./services/scanner/
 # Install workspace dependencies
 RUN pnpm install --frozen-lockfile
 
-# Copy source trees and rules
+# Copy source trees, scripts, and rules
+COPY scripts/ ./scripts/
 COPY packages/shared/ ./packages/shared/
 COPY packages/storage/ ./packages/storage/
 COPY packages/security-engine/ ./packages/security-engine/

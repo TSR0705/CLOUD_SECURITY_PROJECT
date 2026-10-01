@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "rules:validate": "node ../../scripts/validate-yara-rules.mjs rules",
+    "build": "node ../../scripts/validate-yara-rules.mjs rules && tsc",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

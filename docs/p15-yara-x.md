@@ -139,26 +139,44 @@ All production YARA rules must contain mandatory metadata for `severity` and `co
 | `medium`      | `MEDIUM`                          | Probable pattern with context dependence       |
 | `low`         | `LOW`                             | Loose pattern or weak indicator                |
 
-Rules missing `severity` or `confidence` fail closed with `ERROR` and are blocked from production consideration.
+Rules missing `severity` or `confidence` fail closed with `ERROR` and are rejected by the validation gate.
 
 ---
 
-## 6. Signature Version Provenance
+## 6. Signature Version Provenance & Manifest Architecture
 
-Every YARA scan finding recorded in `scan_results` attaches a deterministic `signature_version`.
+Every YARA scan finding recorded in `scan_results` attaches a deterministic `signature_version`. To avoid operational ambiguity, the gateway differentiates the Git commit revision from the cryptographic content tree hash:
 
-- **Primary Source**: Git commit SHA of the versioned rules directory:
-  ```bash
-  git log -1 --format=%H -- packages/scanner/rules
-  ```
-- **Build Manifest**: During container/package builds, a `rules_manifest.json` is generated with `{ "version": "<sha>" }`.
-- **Runtime Fallback**: If `.git` is stripped in production containers, `computeRulesDirectoryContentHash()` calculates a deterministic SHA-256 tree hash over all sorted `.yar` and `.yara` file contents.
+### 6.1 Provenance Hierarchy (`resolveYaraProvenance`)
+
+1. **Environment Override**: `process.env.YARA_RULES_VERSION` (used for deterministic testing or pinned deployment overrides).
+2. **Build-Time Manifest (`rules_manifest.json`)**:
+   Generated during `pnpm build` and container builds. Contains:
+   ```json
+   {
+     "signatureVersion": "262ebdac9c92cc61e1ce0b1c978793ae0267534f",
+     "rulesGitRevision": "262ebdac9c92cc61e1ce0b1c978793ae0267534f",
+     "rulesContentSha256": "a41bbca2b93af4c5db230cd52b2f141d27411e4cba3179dbf6d1a203e5462da5",
+     "generatedAt": "2026-09-30T13:18:09.709Z"
+   }
+   ```
+   If the manifest's `rulesContentSha256` matches current rule contents, the embedded `signatureVersion` is used immediately. This completely eliminates runtime dependency on `.git` in production containers.
+3. **Live Git Repository**:
+   If `.git` is present and clean, resolves `git log -1 --format=%H -- packages/scanner/rules`. If rule files have uncommitted modifications, the version reflects the mutation (`${gitSha}-dirty-${contentHash.slice(0, 8)}`).
+4. **Deterministic Content Tree Hash Fallback**:
+   If Git is absent and no manifest exists, computes a deterministic SHA-256 tree hash over all sorted `.yar` and `.yara` file contents.
+
+### 6.2 Provenance Invariants
+
+- **Reproducibility**: Identical rules always resolve to the exact same version string.
+- **Sensitivity**: Any alteration to rule content produces a different version string.
+- **Isolation**: Container runtimes operate with zero `.git` repository access.
 
 ---
 
 ## 7. Benign Corpus Gate (`fp-01`)
 
-A security rule cannot be considered eligible for blocking until it passes the benign-corpus false-positive gate (`fp-01`).
+A security rule cannot be considered eligible for promotion to the production rule set until it passes the benign-corpus false-positive gate (`fp-01`).
 
 - **Corpus Location**: `tests/fixtures/corpus/benign/`
 - **File Types**: `.txt`, `.json`, `.csv`, `.xml`, `.pdf`, `.png`.
@@ -169,14 +187,24 @@ A security rule cannot be considered eligible for blocking until it passes the b
 
 ---
 
-## 8. Definition of Done: Syntax Error Build Gate
+## 8. Definition of Done: Normal Build Gate Integration (`pnpm build`)
 
 To guarantee invalid rules cannot enter production:
 
-1. `tests/fixtures/yara/invalid/syntax_error.yar` contains a deliberately invalid rule.
-2. `scripts/validate-yara-rules.mjs` executes `yr compile` and metadata validation.
-3. Compiling the invalid fixture exits with code `1` and emits syntax diagnostics.
-4. The test suite asserts that the validation gate fails on syntax errors.
+1. **Root Build Lifecycle Integration**:
+   ```json
+   "build": "node scripts/validate-yara-rules.mjs packages/scanner/rules && tsc -b"
+   ```
+2. **Package Build Lifecycle Integration**:
+   ```json
+   "build": "node ../../scripts/validate-yara-rules.mjs rules && tsc"
+   ```
+3. **Compilation & Metadata Verification**:
+   The validation gate invokes `yr compile` and parses all rule metadata before any TypeScript compilation occurs.
+4. **Fail-Fast Build Abort**:
+   If any syntax error or missing metadata is detected, `validate-yara-rules.mjs` exits with code `1`, immediately terminating `pnpm build` with detailed compiler diagnostics on `stderr`.
+5. **Recovery**:
+   Restoring valid syntax allows `pnpm build` to succeed cleanly (exit code `0`) and regenerate `rules_manifest.json`.
 
 ---
 
@@ -197,7 +225,7 @@ Errors are NEVER converted to `CLEAN`.
 
 ---
 
-## 10. Terminology & Phase Boundary
+## 10. Terminology & Phase Boundary (P15 vs P18 Audit)
 
 ### 10.1 Canonical Terminology
 
@@ -206,14 +234,22 @@ Errors are NEVER converted to `CLEAN`.
 - The gateway DOES NOT state:
   > _"YARA-X proved the file is safe."_
 
-### 10.2 Phase Boundary (Zero P16+ Contamination)
+### 10.2 Phase Boundary & Separation of Responsibilities
 
-Phase P15 produces pattern-matching telemetry.
+Phase P15 is strictly an observational pattern-matching engine. It does NOT make authorization decisions:
 
-- **P15 Scope**: Subprocess invocation, NDJSON parsing, metadata mapping, `scan_results` persistence.
-- **Out of Scope (Deferred to P16–P20)**:
-  - Archive inspection & ZIP-bomb checks (P16).
-  - Deep content inspection for PDF/OOXML (P17).
-  - Risk scoring and ALLOW/BLOCK policy decisions (P18).
-  - Artifact promotion and AES-256-GCM encryption (P19).
-  - Cloud replication (P20).
+1. **Database Isolation**:
+   - `services/scanner` writes findings exclusively to `scan_results` (check_id `scanner.yara`).
+   - `services/scanner` does NOT touch, query, or insert rows into `security_decisions` (0 writes, 0 references).
+2. **Zero Decision Logic**:
+   - The scanner worker records `overallSeverity` and `overallConfidence` solely to populate the columns of the `scan_results` row.
+   - It NEVER evaluates ALLOW, BLOCK, or QUARANTINE policy decisions.
+   - When matching a threat rule, the scan job transitions to `SUCCEEDED` (meaning the scan job completed execution successfully).
+3. **P18 Decision Engine Responsibility**:
+   - In Phase P18, the decision engine evaluates the complete set of finding rows in `scan_results` against application policy rules to synthesize the authoritative `security_decisions` verdict.
+4. **Out of Scope (Deferred to P16–P20)**:
+   - Archive inspection & ZIP-bomb checks (P16).
+   - Deep content inspection for PDF/OOXML (P17).
+   - Risk scoring and ALLOW/BLOCK policy decisions (P18).
+   - Artifact promotion and AES-256-GCM encryption (P19).
+   - Cloud replication (P20).

@@ -1,0 +1,31 @@
+=== P15 vs P18 SCOPE BOUNDARY & RESPONSIBILITY AUDIT ===
+
+1. Phase Mandate & Boundary Separation:
+   - Phase P15 Mandate: YARA-X heuristic engine integration & finding telemetry capture.
+   - Phase P18 Mandate: Policy evaluation, composite risk scoring, ALLOW/BLOCK decision engine.
+   - Status: ZERO decision-engine or risk-scoring logic exists in P15 scanner packages/services.
+
+2. Architectural Boundary Verification:
+   A. Database Table Access:
+      - services/scanner writes to: scan_results (INSERT), scan_jobs (UPDATE state: SUCCEEDED/QUEUED/DEAD)
+      - services/scanner touches security_decisions: NO (0 references, 0 queries, 0 writes)
+
+   B. Policy Decision Logic Audit:
+      - packages/scanner decision logic: NONE (only returns scan findings: CLEAN | MATCH | ERROR)
+      - services/scanner worker decision logic: NONE (only determines overallSeverity & overallConfidence for the scan_results finding row)
+      - scan_job outcome on MATCH: completeScanJob(SUCCEEDED) — the scanning task succeeded; P18 policy engine evaluates findings
+
+3. Codebase Grep Audit Results:
+   - git grep "security_decisions" services/scanner:
+     Matches: NONE (Clean)
+
+   - git grep -iE "(ALLOW|BLOCK|QUARANTINE)" packages/scanner/src:
+     Matches: NONE (Clean)
+
+   - git grep -iE "(ALLOW|BLOCK|QUARANTINE)" services/scanner/src/worker.ts:
+     Matches: NONE (Clean)
+
+4. Invariant Confirmation:
+   - Scanner Worker role is purely observational telemetry capture.
+   - Finding outcomes (PASS / FAIL / ERROR) in scan_results reflect engine-level test results, NOT file-level authorization decisions.
+   - File promotion, quarantine release, and authorization decisions remain strictly deferred to P18/P19.

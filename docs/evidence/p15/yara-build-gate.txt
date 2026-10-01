@@ -1,0 +1,35 @@
+=== P15 NORMAL BUILD GATE VERIFICATION (pnpm build) ===
+
+1. Base normal build verification (pnpm build):
+Command: pnpm build
+Exit Code: 0
+Output:
+$ node scripts/validate-yara-rules.mjs packages/scanner/rules && tsc -b
+[OK] All YARA-X rules in 'packages/scanner/rules' compiled and passed metadata validation. Manifest generated (version: 262ebdac9c92cc61e1ce0b1c978793ae0267534f).
+
+2. Injecting invalid YARA rule syntax (packages/scanner/rules/temp_bad_gate.yar):
+Command: pnpm build
+Exit Code: 1 (Non-zero failure expected)
+Output:
+$ node scripts/validate-yara-rules.mjs packages/scanner/rules && tsc -b
+[ERROR] YARA-X Rule Validation Failed: YARA-X compilation failed (exit code 1):
+error[E001]: syntax error
+ --> C:\Users\ACER\Desktop\CLOUD_SECURITY_PROJECT\packages\scanner\rules\temp_bad_gate.yar:6:10
+  |
+6 |     THIS IS AN INVALID SYNTAX FOR COMPILER GATE
+  |          ^^ expecting `(`, `[`, expression, `%`, operator, `of` or `}`, found `IS`
+error: 1 error(s) found
+[ELIFECYCLE] Command failed with exit code 1.
+
+3. Restoring clean state and re-verifying build recovery:
+Command: pnpm build
+Exit Code: 0 (Zero exit expected)
+Output:
+$ node scripts/validate-yara-rules.mjs packages/scanner/rules && tsc -b
+[OK] All YARA-X rules in 'packages/scanner/rules' compiled and passed metadata validation. Manifest generated (version: 262ebdac9c92cc61e1ce0b1c978793ae0267534f).
+
+4. Invariant Assertions:
+   - Rule validation integrated into canonical build script ("build": "node scripts/validate-yara-rules.mjs packages/scanner/rules && tsc -b"): VERIFIED
+   - Invalid YARA syntax triggers compiler error and aborts build with exit code 1: VERIFIED
+   - Zero circular dependencies or cross-package runtime coupling: VERIFIED
+   - Build recovers cleanly upon rule restoration: VERIFIED

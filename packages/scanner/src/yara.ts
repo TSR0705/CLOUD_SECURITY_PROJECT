@@ -120,25 +120,68 @@ export function parseAndValidateRuleMeta(metaTuples?: unknown): YaraRuleMeta {
   return meta;
 }
 
+export interface YaraRulesProvenance {
+  signatureVersion: string;
+  rulesGitRevision: string | null;
+  rulesContentSha256: string;
+  source: 'env' | 'manifest' | 'git' | 'content_hash';
+}
+
 /**
- * Deterministically resolves the signature_version (Git SHA or deterministic tree hash)
- * for the specified rules directory.
+ * Deterministically resolves the complete provenance (Git SHA, content SHA-256,
+ * and authoritative signature_version) for the specified rules directory.
  */
-export function resolveYaraSignatureVersion(rulesPath: string): string {
+export function resolveYaraProvenance(rulesPath: string): YaraRulesProvenance {
+  const resolvedPath = path.resolve(rulesPath);
+  const contentHash = computeRulesDirectoryContentHash(resolvedPath);
+
   // 1. Explicit environment variable override
   if (process.env.YARA_RULES_VERSION && process.env.YARA_RULES_VERSION.trim() !== '') {
-    return process.env.YARA_RULES_VERSION.trim();
+    const envVal = process.env.YARA_RULES_VERSION.trim();
+    return {
+      signatureVersion: envVal,
+      rulesGitRevision: envVal.length === 40 && /^[0-9a-f]{40}$/i.test(envVal) ? envVal : null,
+      rulesContentSha256: contentHash,
+      source: 'env',
+    };
   }
 
-  const resolvedPath = path.resolve(rulesPath);
-
-  // 2. Check for build-time generated manifest (.rules-version or rules_manifest.json)
+  // 2. Check for build-time generated manifest (rules_manifest.json)
   const manifestFile = path.join(resolvedPath, 'rules_manifest.json');
   if (fs.existsSync(manifestFile)) {
     try {
       const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-      if (manifest && typeof manifest.version === 'string' && manifest.version.trim()) {
-        return manifest.version.trim();
+      if (manifest && typeof manifest === 'object') {
+        const manifestSigVer =
+          typeof manifest.signatureVersion === 'string' && manifest.signatureVersion.trim()
+            ? manifest.signatureVersion.trim()
+            : typeof manifest.version === 'string' && manifest.version.trim()
+              ? manifest.version.trim()
+              : null;
+
+        const manifestContentSha =
+          typeof manifest.rulesContentSha256 === 'string' && manifest.rulesContentSha256.trim()
+            ? manifest.rulesContentSha256.trim()
+            : null;
+
+        const manifestGitRev =
+          typeof manifest.rulesGitRevision === 'string' && manifest.rulesGitRevision.trim()
+            ? manifest.rulesGitRevision.trim()
+            : null;
+
+        if (manifestSigVer) {
+          // If manifest content SHA matches current content hash, or if no manifestContentSha,
+          // the rules are unmutated and exact.
+          if (!manifestContentSha || manifestContentSha === contentHash) {
+            return {
+              signatureVersion: manifestSigVer,
+              rulesGitRevision: manifestGitRev,
+              rulesContentSha256: contentHash,
+              source: 'manifest',
+            };
+          }
+          // If content changed since manifest was generated, manifest is stale: fall through
+        }
       }
     } catch {
       // fallback
@@ -150,7 +193,13 @@ export function resolveYaraSignatureVersion(rulesPath: string): string {
     try {
       const versionStr = fs.readFileSync(dotVersionFile, 'utf8').trim();
       if (versionStr) {
-        return versionStr;
+        return {
+          signatureVersion: versionStr,
+          rulesGitRevision:
+            versionStr.length === 40 && /^[0-9a-f]{40}$/i.test(versionStr) ? versionStr : null,
+          rulesContentSha256: contentHash,
+          source: 'manifest',
+        };
       }
     } catch {
       // fallback
@@ -161,12 +210,39 @@ export function resolveYaraSignatureVersion(rulesPath: string): string {
   try {
     const gitDir = path.join(process.cwd(), '.git');
     if (fs.existsSync(gitDir)) {
+      const statusRes = execSync(`git status --porcelain -- "${resolvedPath}"`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const dirtyRuleFiles = statusRes
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.endsWith('.yar') || l.endsWith('.yara'));
+      const isClean = dirtyRuleFiles.length === 0;
+
       const gitSha = execSync(`git log -1 --format=%H -- "${resolvedPath}"`, {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
       }).trim();
+
       if (gitSha && gitSha.length === 40) {
-        return gitSha;
+        if (isClean) {
+          // Clean working tree: signatureVersion is Git commit SHA
+          return {
+            signatureVersion: gitSha,
+            rulesGitRevision: gitSha,
+            rulesContentSha256: contentHash,
+            source: 'git',
+          };
+        } else {
+          // Modified working tree: rules have changed since commit, so version must reflect change
+          return {
+            signatureVersion: `${gitSha}-dirty-${contentHash.slice(0, 8)}`,
+            rulesGitRevision: gitSha,
+            rulesContentSha256: contentHash,
+            source: 'git',
+          };
+        }
       }
     }
   } catch {
@@ -174,7 +250,20 @@ export function resolveYaraSignatureVersion(rulesPath: string): string {
   }
 
   // 4. Deterministic content tree hash fallback (SHA-256 over all sorted rule contents)
-  return computeRulesDirectoryContentHash(resolvedPath);
+  return {
+    signatureVersion: contentHash,
+    rulesGitRevision: null,
+    rulesContentSha256: contentHash,
+    source: 'content_hash',
+  };
+}
+
+/**
+ * Deterministically resolves the signature_version (Git SHA or deterministic tree hash)
+ * for the specified rules directory.
+ */
+export function resolveYaraSignatureVersion(rulesPath: string): string {
+  return resolveYaraProvenance(rulesPath).signatureVersion;
 }
 
 /**

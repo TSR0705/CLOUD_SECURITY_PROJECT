@@ -348,6 +348,31 @@ describe('Phase P15: YARA-X Integration & Rules DoD Test Suite', () => {
     );
   });
 
+  it('DoD: invalid YARA rule causes normal pnpm build to fail with non-zero exit', () => {
+    const tempBadRule = path.join(RULES_DIR, 'temp_gate_test_invalid.yar');
+    fs.writeFileSync(tempBadRule, 'rule bad_syntax { condition: INVALID SYNTAX !!! }', 'utf8');
+
+    const runBuild = () =>
+      process.platform === 'win32'
+        ? spawnSync('cmd.exe', ['/c', 'pnpm build'], { encoding: 'utf8' })
+        : spawnSync('pnpm', ['build'], { encoding: 'utf8' });
+
+    try {
+      const child = runBuild();
+
+      expect(child.status).not.toBe(0);
+      expect(child.stderr).toMatch(/YARA-X Rule Validation Failed/i);
+    } finally {
+      if (fs.existsSync(tempBadRule)) {
+        fs.unlinkSync(tempBadRule);
+      }
+    }
+
+    // Build must pass once invalid rule is removed
+    const recovery = runBuild();
+    expect(recovery.status).toBe(0);
+  });
+
   // ============================================================
   // 7. ScannerWorker End-to-End Integration & scan_results Persistence
   // ============================================================
@@ -513,5 +538,52 @@ describe('Phase P15: YARA-X Integration & Rules DoD Test Suite', () => {
     expect(scanResultQuery.rows).toHaveLength(1);
     expect(scanResultQuery.rows[0].outcome).toBe('ERROR');
     expect(scanResultQuery.rows[0].reason_code).toBe('SCANNER_ERROR');
+  });
+
+  // ============================================================
+  // 9. P18 Scope Boundary Audit (Zero ALLOW/BLOCK Decision Contamination)
+  // ============================================================
+  it('strictly persists findings to scan_results and never creates security decisions or ALLOW/BLOCK verdicts', async () => {
+    const threatPayload = 'SAMPLE_DATA_CONTAINING_SUG_MALWARE_TEST_PATTERN_P15_THREAT';
+    const testObject = await putTestObject(threatPayload);
+    const { jobId, fileVersionId } = await createScanJobFixture({
+      objectKey: testObject.key,
+      storageVersionId: testObject.versionId,
+      sizeBytes: testObject.size,
+      sha256Ingest: testObject.sha256,
+    });
+
+    const worker = new ScannerWorker({
+      db: scannerPool,
+      storageProvider,
+      enableYara: true,
+      enableClamAv: false,
+      yaraScanner,
+      tempDir: testTmpDir,
+    });
+
+    const runRes = await worker.runOnce();
+    expect(runRes.result?.success).toBe(true);
+    expect(runRes.result?.yara?.status).toBe('MATCH');
+
+    // 1. Worker marks scan_job as SUCCEEDED (job execution succeeded)
+    const jobRes = await adminPool.query('SELECT status FROM scan_jobs WHERE id = $1', [jobId]);
+    expect(jobRes.rows[0].status).toBe('SUCCEEDED');
+
+    // 2. Worker inserted telemetry row into scan_results
+    const scanRes = await adminPool.query(
+      'SELECT check_id, outcome, reason_code FROM scan_results WHERE scan_job_id = $1',
+      [jobId],
+    );
+    expect(scanRes.rows.some((r) => r.check_id === 'scanner.yara' && r.outcome === 'FAIL')).toBe(
+      true,
+    );
+
+    // 3. ZERO security_decisions exist for this file version (P18 responsibility)
+    const decRes = await adminPool.query(
+      'SELECT COUNT(*)::int as count FROM security_decisions WHERE file_version_id = $1',
+      [fileVersionId],
+    );
+    expect(decRes.rows[0].count).toBe(0);
   });
 });
