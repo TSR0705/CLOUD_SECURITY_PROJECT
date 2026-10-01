@@ -1,0 +1,74 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P17 OOXML CHECKS EVIDENCE
+EVIDENCE FOR TEST scan-05 (MACROS) & scan-06 (EXTERNAL RELATIONSHIPS)
+================================================================================
+
+1. OBJECTIVES & ARCHITECTURE
+--------------------------------------------------------------------------------
+Canonical check IDs:
+  - scanner.ooxml.macro        (Macro and VBA Project Inspection, scan-05)
+  - scanner.ooxml.relationship (External Relationship Inspection, scan-06)
+
+Engine Implementation:
+  - Built upon Phase P16 safe archive infrastructure (yauzl 3.4.0).
+  - Lazy entry traversal (lazyEntries: true) with strictly bounded memory reading.
+  - Zero filesystem extraction; all inspections performed in-memory on buffered streams.
+  - NO execution of macros or VBA code.
+  - ZERO network or DNS calls: strictly static inspection of relationship XML parts.
+
+2. scan-05: OOXML MACRO DETECTION
+--------------------------------------------------------------------------------
+Monitored Indicators:
+  1. Entry Names:
+     - word/vbaProject.bin, xl/vbaProject.bin, ppt/vbaProject.bin
+     - vbaData.xml
+  2. Content Types in [Content_Types].xml:
+     - application/vnd.ms-office.vbaProject
+     - application/vnd.ms-word.document.macroEnabled.main+xml
+     - application/vnd.ms-excel.sheet.macroEnabled.main+xml
+     - application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml
+     - application/vnd.ms-word.template.macroEnabledTemplate.main+xml
+     - application/vnd.ms-excel.template.macroEnabled.main+xml
+
+Test Results (scan-05):
+  - Clean DOCX:           outcome = PASS, reasonCode = CLEAN
+  - Macro-Enabled DOCM:   outcome = FAIL, reasonCode = OOXML_MACRO_DETECTED
+  - Evidence Recorded:    macroEntries: ['word/vbaProject.bin'], macroContentTypes: []
+
+3. scan-06: OOXML EXTERNAL RELATIONSHIP DETECTION
+--------------------------------------------------------------------------------
+Monitored Indicators:
+  - Any .rels part: _rels/.rels, word/_rels/*.rels, xl/_rels/*.rels, ppt/_rels/*.rels
+  - XML tags matching:
+      <Relationship ... TargetMode="External" ... />
+      Target="http://..." or Target="https://..." or Target="file://..."
+
+Security Invariants:
+  - Strictly static parsing of XML text.
+  - No socket connection, no HTTP request, and no DNS lookup is executed.
+  - Targets extracted and stored in finding evidence for downstream audit and decision engine.
+
+Test Results (scan-06):
+  - Clean Relationships:   outcome = PASS, reasonCode = CLEAN, targetCount = 0
+  - External Attached Rel: outcome = FAIL, reasonCode = OOXML_EXTERNAL_RELATIONSHIP
+  - Evidence Recorded:
+      targetCount: 1
+      externalTargets: [
+        {
+          target: "http://c2.example.com/exploit.dotm",
+          id: "rId1",
+          type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/attachedTemplate",
+          sourcePart: "word/_rels/document.xml.rels"
+        }
+      ]
+
+4. ARTIFACT IDENTITY BINDING (Both Checks)
+--------------------------------------------------------------------------------
+Both scan_results records (scanner.ooxml.macro and scanner.ooxml.relationship)
+record the exact P12 identity tuple:
+  scanned_storage_version_id == file_versions.storage_version_id
+  scanned_sha256 == file_versions.sha256_ingest
+  scanned_size == file_versions.size_bytes
+
+GATE VERDICT: FULL PASS (scan-05 & scan-06)
+================================================================================

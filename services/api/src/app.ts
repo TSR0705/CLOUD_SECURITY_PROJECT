@@ -26,6 +26,7 @@ import { derivePublicKeyPem } from './auth/jwt.js';
 import { createS3Provider, type StorageProvider } from '@sug/storage';
 import { StreamingUploadService } from './upload/streaming-service.js';
 import { uploadRoutes } from './routes/upload.js';
+import { scansRoutes } from './routes/scans.js';
 import pg from 'pg';
 
 export interface AppOptions {
@@ -307,6 +308,13 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   await app.register(uploadRoutes, {
     apiKeyService,
     streamingUploadService,
+    jwtPublicKeyPem,
+  });
+
+  // 13. Scan Findings & Status Routes (P17)
+  await app.register(scansRoutes, {
+    db: authDb,
+    apiKeyService,
     jwtPublicKeyPem,
   });
 

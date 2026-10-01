@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     tar \
+    qpdf \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and verify official YARA-X 1.20.0 release binary

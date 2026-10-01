@@ -1,0 +1,67 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P17 IMAGE CHECKS EVIDENCE
+DETECTION OF TRAILING DATA AFTER FORMAT-LEGAL TERMINATION MARKERS
+================================================================================
+
+1. OBJECTIVE & RATIONALE
+--------------------------------------------------------------------------------
+Canonical check ID:  scanner.image.trailing
+Detector Engine:     sug.image.trailing
+Target Formats:      PNG, JPEG, GIF
+
+Security Threat:
+  Attackers frequently append executable payloads, shellcode, steganographic secrets,
+  or C2 commands immediately after legitimate image end-of-file markers. Most image
+  viewers ignore trailing bytes and render the picture cleanly, while malware extractors
+  or browser polyglot exploits read the appended payload.
+
+2. FORMAT-LEGAL TERMINATION SPECIFICATIONS
+--------------------------------------------------------------------------------
+1. PNG (Portable Network Graphics):
+   - Signature: \x89PNG\r\n\x1a\n (89 50 4E 47 0D 0A 1A 0A)
+   - Chunks parsed sequentially: 4-byte Length, 4-byte Type, N-byte Data, 4-byte CRC.
+   - Termination Marker: IEND chunk (Length = 0, Type = IEND, CRC = 4 bytes).
+   - Legal EOF Offset: Offset of IEND + 12 bytes.
+   - Any non-whitespace payload trailing after IEND chunk + CRC is flagged.
+
+2. JPEG (Joint Photographic Experts Group):
+   - Signature: 0xFF 0xD8 (SOI - Start of Image)
+   - Segments parsed through markers (SOF, DQT, DHT, SOS, RST).
+   - Termination Marker: 0xFF 0xD9 (EOI - End of Image).
+   - Legal EOF Offset: Offset of last valid 0xFF 0xD9 + 2 bytes.
+   - Any non-null/non-whitespace bytes after EOI are flagged.
+
+3. GIF (Graphics Interchange Format):
+   - Signature: GIF87a or GIF89a (6 bytes)
+   - Blocks parsed through descriptors, extension blocks, and image data.
+   - Termination Marker: Single trailer byte 0x3B (ASCII ';').
+   - Legal EOF Offset: Offset of 0x3B + 1 byte.
+   - Any non-null bytes after 0x3B are flagged.
+
+3. VERIFICATION MATRIX
+--------------------------------------------------------------------------------
+Image Format  Input Type                Legal End (Bytes) Total File Size (Bytes)  Outcome  Reason Code
+---------------------------------------------------------------------------------------------------------------------
+PNG           Clean Synthesized PNG     67                67                       PASS     CLEAN
+PNG           Poisoned Trailing PNG     67                135 (+68 bytes payload)  FAIL     IMAGE_TRAILING_DATA_DETECTED
+JPEG          Clean Synthesized JPEG    22                22                       PASS     CLEAN
+JPEG          Poisoned Trailing JPEG    22                55 (+33 bytes payload)   FAIL     IMAGE_TRAILING_DATA_DETECTED
+GIF           Clean Synthesized GIF     14                14                       PASS     CLEAN
+GIF           Poisoned Trailing GIF     14                55 (+41 bytes payload)   FAIL     IMAGE_TRAILING_DATA_DETECTED
+
+4. FINDINGS PERSISTENCE & EVIDENCE STRUCTURE
+--------------------------------------------------------------------------------
+Sample Evidence JSON for Poisoned PNG:
+{
+  "status": "TRAILING_DATA_DETECTED",
+  "format": "png",
+  "trailerOffset": 67,
+  "trailingBytesCount": 68,
+  "trailingPreviewHex": "53555250524953455f5041594c4f41445f415050454e4445445f41465445525f..."
+}
+
+Bound to ArtifactIdentity:
+  scanned_storage_version_id, scanned_sha256, scanned_size recorded in PostgreSQL scan_results.
+
+GATE VERDICT: FULL PASS
+================================================================================

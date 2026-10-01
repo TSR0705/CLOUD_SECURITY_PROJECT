@@ -2750,6 +2750,305 @@
           }
         }
       }
+    },
+    "/api/v1/scans/{id}": {
+      "get": {
+        "summary": "Get scan job status and security findings",
+        "tags": ["Scans"],
+        "description": "Retrieves the status, identity binding, and deterministic security findings for a scan job. Requires API key or authenticated user token, and enforces tenant application isolation.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Scan Job UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "DEAD"],
+                      "example": "SUCCEEDED"
+                    },
+                    "fileVersionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "finishedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "checkId": {
+                            "type": "string",
+                            "example": "scanner.clamav"
+                          },
+                          "engine": {
+                            "type": "string",
+                            "example": "clamav"
+                          },
+                          "engineVersion": {
+                            "type": "string",
+                            "example": "1.4.6",
+                            "nullable": true
+                          },
+                          "signatureVersion": {
+                            "type": "string",
+                            "example": "27200",
+                            "nullable": true
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": ["PASS", "FAIL", "SUSPICIOUS", "ERROR", "SKIPPED"],
+                            "example": "PASS"
+                          },
+                          "reasonCode": {
+                            "type": "string",
+                            "example": "CLEAN"
+                          },
+                          "severity": {
+                            "type": "string",
+                            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+                            "example": "INFO"
+                          },
+                          "confidence": {
+                            "type": "string",
+                            "enum": ["CONFIRMED", "HIGH", "MEDIUM", "LOW"],
+                            "example": "CONFIRMED"
+                          },
+                          "evidence": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "scannedStorageVersionId": {
+                            "type": "string",
+                            "example": "12345"
+                          },
+                          "scannedSha256": {
+                            "type": "string",
+                            "example": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                          },
+                          "scannedSize": {
+                            "type": "number",
+                            "example": 1024
+                          },
+                          "durationMs": {
+                            "type": "number",
+                            "example": 45,
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "checkId",
+                          "engine",
+                          "outcome",
+                          "reasonCode",
+                          "severity",
+                          "confidence",
+                          "evidence",
+                          "scannedStorageVersionId",
+                          "scannedSha256",
+                          "scannedSize",
+                          "createdAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status",
+                    "fileVersionId",
+                    "createdAt",
+                    "finishedAt",
+                    "findings"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/scans/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/scans/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/scans/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/scans/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [

@@ -9,6 +9,9 @@ import {
   type ReaperResult,
   type SeverityLevel,
   type ConfidenceLevel,
+  type CheckId,
+  type CanonicalReasonCode,
+  type FindingOutcome,
   claimScanJob,
   completeScanJob,
   failScanJob,
@@ -34,6 +37,17 @@ import {
   inspectArchive,
   type ArchiveInspectionResult,
   type ArchiveInspectionBudget,
+  inspectPdf,
+  type PdfCheckResult,
+  inspectOoxml,
+  type OoxmlMacroResult,
+  type OoxmlRelationshipResult,
+  inspectImageTrailing,
+  type ImageTrailingResult,
+  inspectEmbeddedSignatures,
+  type EmbeddedSignatureResult,
+  inspectPolyglot,
+  type PolyglotResult,
 } from '@sug/security-engine';
 
 export {
@@ -77,6 +91,7 @@ export interface ScannerWorkerOptions {
   enableArchive?: boolean;
   archiveBudget?: Partial<ArchiveInspectionBudget>;
   archiveAllowed?: boolean;
+  enableFormatChecks?: boolean;
   rulesDir?: string;
   workerId?: string;
   leaseTimeoutMs?: number;
@@ -94,6 +109,12 @@ export interface ProcessJobResult {
   clamav?: ClamAvScanResult | undefined;
   yara?: YaraScanResult | undefined;
   archive?: ArchiveInspectionResult | undefined;
+  pdf?: PdfCheckResult | undefined;
+  ooxmlMacro?: OoxmlMacroResult | undefined;
+  ooxmlRelationship?: OoxmlRelationshipResult | undefined;
+  imageTrailing?: ImageTrailingResult | undefined;
+  embeddedSig?: EmbeddedSignatureResult | undefined;
+  polyglot?: PolyglotResult | undefined;
   sha256?: string | undefined;
   size?: number | undefined;
   error?: string | undefined;
@@ -110,6 +131,7 @@ export class ScannerWorker {
   readonly enableArchive: boolean;
   readonly archiveBudget?: Partial<ArchiveInspectionBudget> | undefined;
   readonly archiveAllowed?: boolean | undefined;
+  readonly enableFormatChecks: boolean;
   private readonly db: DatabaseExecutor;
   private readonly storageProvider: StorageProvider;
   private readonly pollIntervalMs: number;
@@ -160,6 +182,8 @@ export class ScannerWorker {
     this.enableArchive = options.enableArchive ?? true;
     this.archiveBudget = options.archiveBudget;
     this.archiveAllowed = options.archiveAllowed;
+    this.enableFormatChecks =
+      options.enableFormatChecks ?? process.env.SCANNER_ENABLE_FORMAT_CHECKS === 'true';
 
     const rawReaperInterval =
       options.reaperIntervalMs ??
@@ -182,6 +206,57 @@ export class ScannerWorker {
       warn: () => {},
       error: () => {},
     };
+  }
+
+  /**
+   * Persists a deterministic scan finding record to scan_results with idempotency.
+   */
+  async recordFinding(params: {
+    jobId: string;
+    fileVersionId: string;
+    checkId: CheckId;
+    engine: string;
+    engineVersion?: string | undefined;
+    signatureVersion?: string | undefined;
+    outcome: FindingOutcome;
+    reasonCode: CanonicalReasonCode;
+    severity: SeverityLevel;
+    confidence: ConfidenceLevel;
+    evidence: Record<string, unknown>;
+    storageVersionId: string;
+    sha256Hex: string;
+    sizeBytes: number;
+    durationMs: number;
+  }): Promise<void> {
+    await this.db.query(
+      `INSERT INTO scan_results (
+         scan_job_id, file_version_id, check_id, engine, engine_version,
+         signature_version, outcome, reason_code, severity, confidence,
+         evidence, scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+       ) VALUES (
+         $1, $2, $3, $4, $5,
+         $6, $7, $8, $9, $10,
+         $11::jsonb, $12, $13, $14, $15
+       )
+       ON CONFLICT (scan_job_id, check_id) DO NOTHING`,
+      [
+        params.jobId,
+        params.fileVersionId,
+        params.checkId,
+        params.engine,
+        params.engineVersion ?? null,
+        params.signatureVersion ?? null,
+        params.outcome,
+        params.reasonCode,
+        params.severity,
+        params.confidence,
+        JSON.stringify(params.evidence),
+        params.storageVersionId,
+        Buffer.from(params.sha256Hex, 'hex'),
+        params.sizeBytes,
+        params.durationMs,
+      ],
+    );
   }
 
   /**
@@ -696,6 +771,52 @@ export class ScannerWorker {
         }
       }
 
+      let origName = path.basename(objectKey).toLowerCase();
+      let policyDoc: Record<string, unknown> | null = null;
+
+      // Try resolving upload session from objectKey identifier (last UUID in path is upload session ID)
+      const uuidMatches = objectKey.match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
+      );
+      const sessionId = uuidMatches ? uuidMatches[uuidMatches.length - 1] : undefined;
+      if (sessionId) {
+        try {
+          const sessionQuery = await this.db.query<{
+            original_filename: string;
+            policy_document: Record<string, unknown> | null;
+          }>(
+            `SELECT us.original_filename, sp.document AS policy_document
+               FROM upload_sessions us
+               LEFT JOIN security_policies sp ON sp.id = us.policy_id
+               WHERE us.id = $1`,
+            [sessionId],
+          );
+          if (sessionQuery.rows.length > 0) {
+            if (sessionQuery.rows[0]!.original_filename) {
+              origName = sessionQuery.rows[0]!.original_filename.toLowerCase();
+            }
+            policyDoc = sessionQuery.rows[0]!.policy_document;
+          }
+        } catch (dbErr) {
+          this.logger.warn('Failed to query upload session / policy for archive check', {
+            jobId: job.id,
+            error: (dbErr as Error).message,
+          });
+        }
+      }
+
+      const isArchiveExt =
+        origName.endsWith('.zip') ||
+        origName.endsWith('.docx') ||
+        origName.endsWith('.xlsx') ||
+        origName.endsWith('.pptx') ||
+        origName.endsWith('.jar') ||
+        origName.endsWith('.odt') ||
+        origName.endsWith('.ods') ||
+        origName.endsWith('.odp');
+      const isOoxml =
+        origName.endsWith('.docx') || origName.endsWith('.xlsx') || origName.endsWith('.pptx');
+
       let archiveResult: ArchiveInspectionResult | undefined;
 
       // 9. If archive inspection is enabled, check if artifact is a ZIP or OOXML container
@@ -710,52 +831,6 @@ export class ScannerWorker {
         } catch {
           // ignore stat/read failure here
         }
-
-        let origName = path.basename(objectKey).toLowerCase();
-        let policyDoc: Record<string, unknown> | null = null;
-
-        // Try resolving upload session from objectKey identifier (last UUID in path is upload session ID)
-        const uuidMatches = objectKey.match(
-          /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
-        );
-        const sessionId = uuidMatches ? uuidMatches[uuidMatches.length - 1] : undefined;
-        if (sessionId) {
-          try {
-            const sessionQuery = await this.db.query<{
-              original_filename: string;
-              policy_document: Record<string, unknown> | null;
-            }>(
-              `SELECT us.original_filename, sp.document AS policy_document
-               FROM upload_sessions us
-               LEFT JOIN security_policies sp ON sp.id = us.policy_id
-               WHERE us.id = $1`,
-              [sessionId],
-            );
-            if (sessionQuery.rows.length > 0) {
-              if (sessionQuery.rows[0]!.original_filename) {
-                origName = sessionQuery.rows[0]!.original_filename.toLowerCase();
-              }
-              policyDoc = sessionQuery.rows[0]!.policy_document;
-            }
-          } catch (dbErr) {
-            this.logger.warn('Failed to query upload session / policy for archive check', {
-              jobId: job.id,
-              error: (dbErr as Error).message,
-            });
-          }
-        }
-
-        const isArchiveExt =
-          origName.endsWith('.zip') ||
-          origName.endsWith('.docx') ||
-          origName.endsWith('.xlsx') ||
-          origName.endsWith('.pptx') ||
-          origName.endsWith('.jar') ||
-          origName.endsWith('.odt') ||
-          origName.endsWith('.ods') ||
-          origName.endsWith('.odp');
-        const isOoxml =
-          origName.endsWith('.docx') || origName.endsWith('.xlsx') || origName.endsWith('.pptx');
 
         if (isZipMagic || isArchiveExt) {
           this.logger.info('Invoking archive security inspection', {
@@ -868,7 +943,177 @@ export class ScannerWorker {
         }
       }
 
-      // 10. All enabled scans completed without error! Transition job to SUCCEEDED
+      let pdfResult: PdfCheckResult | undefined;
+      let ooxmlMacroResult: OoxmlMacroResult | undefined;
+      let ooxmlRelationshipResult: OoxmlRelationshipResult | undefined;
+      let imageTrailingResult: ImageTrailingResult | undefined;
+      let embeddedSigResult: EmbeddedSignatureResult | undefined;
+      let polyglotResult: PolyglotResult | undefined;
+
+      // 10. If format checks are enabled, execute P17 format-specific checks
+      if (this.enableFormatChecks) {
+        let headerBuffer = Buffer.alloc(0);
+        try {
+          const fd = await fs.promises.open(localArtifactPath, 'r');
+          const tmpBuf = Buffer.alloc(1024);
+          const { bytesRead } = await fd.read(tmpBuf, 0, 1024, 0);
+          await fd.close();
+          headerBuffer = tmpBuf.subarray(0, bytesRead);
+        } catch {
+          // ignore
+        }
+
+        // A. PDF Active-Content check (scan-04)
+        const isPdf = origName.endsWith('.pdf') || headerBuffer.includes(Buffer.from('%PDF-'));
+        if (isPdf) {
+          this.logger.info('Invoking PDF active-content inspection', { jobId: job.id });
+          pdfResult = await inspectPdf({ filePath: localArtifactPath });
+          await this.recordFinding({
+            jobId: job.id,
+            fileVersionId: job.fileVersionId,
+            checkId: 'scanner.pdf',
+            engine: pdfResult.engine,
+            engineVersion: pdfResult.engineVersion,
+            outcome: pdfResult.outcome,
+            reasonCode: pdfResult.reasonCode,
+            severity: pdfResult.severity,
+            confidence: pdfResult.confidence,
+            evidence: pdfResult.evidence,
+            storageVersionId,
+            sha256Hex: calculatedSha256,
+            sizeBytes: calculatedSize,
+            durationMs: pdfResult.durationMs,
+          });
+        }
+
+        // B. OOXML Macro & Relationship checks (scan-05 & scan-06)
+        if (
+          isOoxml ||
+          origName.endsWith('.docm') ||
+          origName.endsWith('.xlsm') ||
+          origName.endsWith('.pptm')
+        ) {
+          this.logger.info('Invoking OOXML security checks', { jobId: job.id });
+          const ooxmlCheck = await inspectOoxml({ filePath: localArtifactPath });
+          ooxmlMacroResult = ooxmlCheck.macro;
+          ooxmlRelationshipResult = ooxmlCheck.relationships;
+
+          await this.recordFinding({
+            jobId: job.id,
+            fileVersionId: job.fileVersionId,
+            checkId: 'scanner.ooxml.macro',
+            engine: ooxmlMacroResult.engine,
+            engineVersion: ooxmlMacroResult.engineVersion,
+            outcome: ooxmlMacroResult.outcome,
+            reasonCode: ooxmlMacroResult.reasonCode,
+            severity: ooxmlMacroResult.severity,
+            confidence: ooxmlMacroResult.confidence,
+            evidence: ooxmlMacroResult.evidence,
+            storageVersionId,
+            sha256Hex: calculatedSha256,
+            sizeBytes: calculatedSize,
+            durationMs: ooxmlMacroResult.durationMs,
+          });
+
+          await this.recordFinding({
+            jobId: job.id,
+            fileVersionId: job.fileVersionId,
+            checkId: 'scanner.ooxml.relationship',
+            engine: ooxmlRelationshipResult.engine,
+            engineVersion: ooxmlRelationshipResult.engineVersion,
+            outcome: ooxmlRelationshipResult.outcome,
+            reasonCode: ooxmlRelationshipResult.reasonCode,
+            severity: ooxmlRelationshipResult.severity,
+            confidence: ooxmlRelationshipResult.confidence,
+            evidence: ooxmlRelationshipResult.evidence,
+            storageVersionId,
+            sha256Hex: calculatedSha256,
+            sizeBytes: calculatedSize,
+            durationMs: ooxmlRelationshipResult.durationMs,
+          });
+        }
+
+        // C. Image Trailing Data check
+        const isImage =
+          origName.endsWith('.png') ||
+          origName.endsWith('.jpg') ||
+          origName.endsWith('.jpeg') ||
+          origName.endsWith('.gif') ||
+          (headerBuffer.length >= 8 &&
+            headerBuffer
+              .subarray(0, 8)
+              .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ||
+          (headerBuffer.length >= 2 &&
+            headerBuffer.subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))) ||
+          (headerBuffer.length >= 6 &&
+            (headerBuffer.subarray(0, 6).toString('ascii').startsWith('GIF87a') ||
+              headerBuffer.subarray(0, 6).toString('ascii').startsWith('GIF89a')));
+
+        if (isImage) {
+          this.logger.info('Invoking image trailing data inspection', { jobId: job.id });
+          imageTrailingResult = await inspectImageTrailing({ filePath: localArtifactPath });
+          if (imageTrailingResult.format) {
+            await this.recordFinding({
+              jobId: job.id,
+              fileVersionId: job.fileVersionId,
+              checkId: 'scanner.image.trailing',
+              engine: imageTrailingResult.engine,
+              engineVersion: imageTrailingResult.engineVersion,
+              outcome: imageTrailingResult.outcome,
+              reasonCode: imageTrailingResult.reasonCode,
+              severity: imageTrailingResult.severity,
+              confidence: imageTrailingResult.confidence,
+              evidence: imageTrailingResult.evidence,
+              storageVersionId,
+              sha256Hex: calculatedSha256,
+              sizeBytes: calculatedSize,
+              durationMs: imageTrailingResult.durationMs,
+            });
+          }
+        }
+
+        // D. Embedded Executable Signature check
+        this.logger.info('Invoking embedded signature inspection', { jobId: job.id });
+        embeddedSigResult = await inspectEmbeddedSignatures({ filePath: localArtifactPath });
+        await this.recordFinding({
+          jobId: job.id,
+          fileVersionId: job.fileVersionId,
+          checkId: 'scanner.signature.embedded',
+          engine: embeddedSigResult.engine,
+          engineVersion: embeddedSigResult.engineVersion,
+          outcome: embeddedSigResult.outcome,
+          reasonCode: embeddedSigResult.reasonCode,
+          severity: embeddedSigResult.severity,
+          confidence: embeddedSigResult.confidence,
+          evidence: embeddedSigResult.evidence,
+          storageVersionId,
+          sha256Hex: calculatedSha256,
+          sizeBytes: calculatedSize,
+          durationMs: embeddedSigResult.durationMs,
+        });
+
+        // E. Polyglot check (poly-01, poly-02, poly-03)
+        this.logger.info('Invoking polyglot inspection', { jobId: job.id });
+        polyglotResult = await inspectPolyglot({ filePath: localArtifactPath });
+        await this.recordFinding({
+          jobId: job.id,
+          fileVersionId: job.fileVersionId,
+          checkId: 'scanner.polyglot',
+          engine: polyglotResult.engine,
+          engineVersion: polyglotResult.engineVersion,
+          outcome: polyglotResult.outcome,
+          reasonCode: polyglotResult.reasonCode,
+          severity: polyglotResult.severity,
+          confidence: polyglotResult.confidence,
+          evidence: polyglotResult.evidence,
+          storageVersionId,
+          sha256Hex: calculatedSha256,
+          sizeBytes: calculatedSize,
+          durationMs: polyglotResult.durationMs,
+        });
+      }
+
+      // 11. All enabled scans completed without error! Transition job to SUCCEEDED
       await completeScanJob(this.db, job.id, {
         workerId: this.workerId,
         now: this.now,
@@ -889,6 +1134,12 @@ export class ScannerWorker {
         clamav: clamavResult,
         yara: yaraResult,
         archive: archiveResult,
+        pdf: pdfResult,
+        ooxmlMacro: ooxmlMacroResult,
+        ooxmlRelationship: ooxmlRelationshipResult,
+        imageTrailing: imageTrailingResult,
+        embeddedSig: embeddedSigResult,
+        polyglot: polyglotResult,
         sha256: calculatedSha256,
         size: calculatedSize,
       };

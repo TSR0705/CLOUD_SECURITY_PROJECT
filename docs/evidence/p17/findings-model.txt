@@ -1,0 +1,108 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P17 FINDINGS MODEL EVIDENCE
+CANONICAL SCHEMA, REASON CODES, IDEMPOTENCY & ARTIFACT IDENTITY BINDING
+================================================================================
+
+1. CANONICAL FINDINGS ARCHITECTURE
+--------------------------------------------------------------------------------
+Phase P17 finalizes the unified findings persistence model for all scanning engines.
+Every detector (ClamAV, YARA-X, Archive, PDF, OOXML Macro, OOXML Relationship,
+Image Trailing, Embedded Signatures, Polyglots) produces deterministic findings
+persisted into the immutable `scan_results` relation.
+
+CRITICAL INVARIANT:
+P17 is strictly an EVIDENCE and DETECTION phase.
+Findings record what was observed (PASS, FAIL, SUSPICIOUS, ERROR, SKIPPED).
+P17 DOES NOT evaluate policy decisions, calculate risk scores, or emit
+ALLOW, BLOCK, or QUARANTINE verdicts (reserved for Phase P18 Decision Engine).
+
+2. DATABASE SCHEMA & IMMUTABILITY (scan_results)
+--------------------------------------------------------------------------------
+CREATE TABLE scan_results (
+    id                          uuid PRIMARY KEY DEFAULT uuidv7(),
+    scan_job_id                 uuid NOT NULL REFERENCES scan_jobs(id),
+    file_version_id             uuid NOT NULL REFERENCES file_versions(id),
+    check_id                    text NOT NULL,
+    engine                      text NOT NULL,
+    engine_version              text,
+    signature_version           text,
+    outcome                     finding_outcome NOT NULL,
+    reason_code                 text,
+    severity                    severity_level NOT NULL DEFAULT 'INFO',
+    confidence                  confidence_level NOT NULL DEFAULT 'CONFIRMED',
+    evidence                    jsonb NOT NULL DEFAULT '{}',
+    scanned_storage_version_id  text NOT NULL,
+    scanned_sha256              bytea NOT NULL CHECK (octet_length(scanned_sha256) = 32),
+    scanned_size                bigint NOT NULL,
+    duration_ms                 integer,
+    created_at                  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (scan_job_id, check_id)
+);
+
+CREATE TRIGGER scan_results_immutable
+    BEFORE UPDATE OR DELETE OR TRUNCATE ON scan_results
+    FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
+
+IMMUTABILITY & IDEMPOTENCY:
+- Table is append-only; enforce by `forbid_mutation()` trigger.
+- Idempotency enforced via `UNIQUE (scan_job_id, check_id)`.
+- Concurrent or replayed scanning jobs utilize:
+    INSERT INTO scan_results (...) VALUES (...)
+    ON CONFLICT (scan_job_id, check_id) DO NOTHING;
+- Safe against re-scans while preserving cryptographic integrity of historical findings.
+
+3. ARTIFACT IDENTITY TUPLE BINDING (P12 Binding)
+--------------------------------------------------------------------------------
+Every row in `scan_results` is cryptographically bound to the artifact scanned:
+  (bucket, object_key, scanned_storage_version_id, scanned_sha256, scanned_size)
+Asserted Invariants:
+  1. finding.scanned_storage_version_id == file_versions.storage_version_id
+  2. finding.scanned_sha256 == file_versions.sha256_ingest
+  3. finding.scanned_size == file_versions.size_bytes
+
+4. CANONICAL REASON CODE REGISTRY
+--------------------------------------------------------------------------------
+Stable machine-readable identifiers registered in @sug/shared/reasons:
+
+Check ID                     Canonical Reason Code            Outcome    Default Severity
+-----------------------------------------------------------------------------------------
+universal                    CLEAN                            PASS       INFO
+universal                    SCANNER_ERROR                    ERROR      HIGH
+universal                    NOT_APPLICABLE                   SKIPPED    INFO
+universal                    MALWARE_DETECTED                 FAIL       CRITICAL
+scanner.archive              ARCHIVE_BOMB_DETECTED            FAIL       CRITICAL
+scanner.archive              COMPRESSION_RATIO_EXCEEDED       FAIL       HIGH
+scanner.archive              UNCOMPRESSED_SIZE_EXCEEDED       FAIL       HIGH
+scanner.archive              ENTRY_COUNT_EXCEEDED             FAIL       HIGH
+scanner.archive              OVERLAPPING_ENTRIES              FAIL       CRITICAL
+scanner.archive              DUPLICATE_ENTRY_NAMES            FAIL       MEDIUM
+scanner.archive              UNSAFE_PATH                      FAIL       CRITICAL
+scanner.archive              ZIP_SLIP_DETECTED                FAIL       CRITICAL
+scanner.archive              ENCRYPTED_ARCHIVE_FORBIDDEN      FAIL       HIGH
+scanner.archive              UNSUPPORTED_COMPRESSION_METHOD   FAIL       MEDIUM
+scanner.archive              SYMLINK_FORBIDDEN                FAIL       HIGH
+scanner.archive              NESTED_ARCHIVE_DEPTH_EXCEEDED    FAIL       HIGH
+scanner.archive              CORRUPT_ARCHIVE                  FAIL       HIGH
+scanner.archive              SIZE_MISMATCH                    FAIL       HIGH
+scanner.archive              CRC_MISMATCH                     FAIL       HIGH
+scanner.archive              TIMEOUT_EXCEEDED                 FAIL       HIGH
+scanner.archive              MEMORY_BUDGET_EXCEEDED           FAIL       HIGH
+scanner.archive              ARCHIVE_FORBIDDEN                FAIL       HIGH
+scanner.pdf                  ACTIVE_CONTENT_DETECTED          FAIL       HIGH
+scanner.pdf                  PDF_MALFORMED                    ERROR      HIGH
+scanner.pdf                  PDF_NORMALIZATION_FAILED         ERROR      HIGH
+scanner.ooxml.macro          OOXML_MACRO_DETECTED             FAIL       HIGH
+scanner.ooxml.relationship   OOXML_EXTERNAL_RELATIONSHIP      FAIL       MEDIUM
+scanner.image.trailing       IMAGE_TRAILING_DATA_DETECTED     FAIL       HIGH
+scanner.signature.embedded   EMBEDDED_EXECUTABLE_DETECTED     FAIL       CRITICAL
+scanner.polyglot             POLYGLOT_DETECTED                FAIL       CRITICAL
+
+5. VERIFICATION STATUS
+--------------------------------------------------------------------------------
+- Unit Tests:        tests/unit/security-engine/format-checks.test.ts (22/22 PASS)
+- Integration Tests: tests/integration/scanner/p17-format-checks.test.ts (7/7 PASS)
+- API Tests:         tests/integration/api/p17-scans-api.test.ts (6/6 PASS)
+- Invariant Tests:   tests/integration/db/invariants.test.ts (15/15 PASS)
+
+GATE VERDICT: FULL PASS
+================================================================================

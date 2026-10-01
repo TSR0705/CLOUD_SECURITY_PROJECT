@@ -1,0 +1,105 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P17 SCAN FINDINGS API EVIDENCE
+GET /api/v1/scans/:id SPECIFICATION, AUTHORIZATION & BOUNDARY VERIFICATION
+================================================================================
+
+1. ENDPOINT SPECIFICATION
+--------------------------------------------------------------------------------
+Path:        GET /api/v1/scans/:id
+Description: Retrieves scan job execution status and deterministic security findings.
+Auth:        Bearer <sug_api_key> (P6) OR Bearer <user_jwt> (P7)
+OpenAPI:     Generated and validated in docs/openapi.json under "Scans" tag.
+
+2. SECURITY & AUTHORIZATION INVARIANTS
+--------------------------------------------------------------------------------
+1. Authentication:
+   - Unauthenticated requests return HTTP 401 with RFC 7807/9457 Problem Details.
+   - Rejects invalid, malformed, or revoked API keys and expired JWTs.
+2. Parameter Validation:
+   - Non-UUID scan IDs return HTTP 400 with `urn:sug:error:validation`.
+3. Existence:
+   - Unknown scan jobs return HTTP 404 with `urn:sug:error:not-found`.
+4. Tenant Application Isolation:
+   - If authenticated via API Key: the scan job's associated file must belong to
+     the caller's `application_id`.
+   - Access attempts across tenant applications return HTTP 403 Forbidden with
+     `urn:sug:error:forbidden`.
+5. Deterministic Finding Order:
+   - All findings returned in the `findings` array are deterministically sorted
+     by `check_id ASC`.
+
+3. RESPONSE PAYLOAD SCHEMA (HTTP 200 OK)
+--------------------------------------------------------------------------------
+{
+  "id": "018f3a5e-7a42-7000-8000-000000000001",
+  "status": "SUCCEEDED",
+  "fileVersionId": "018f3a5e-7a42-7000-8000-000000000002",
+  "createdAt": "2026-10-01T10:00:00.000Z",
+  "finishedAt": "2026-10-01T10:00:01.250Z",
+  "findings": [
+    {
+      "id": "018f3a5e-7a42-7000-8000-000000000010",
+      "checkId": "scanner.archive",
+      "engine": "yauzl",
+      "engineVersion": "3.4.0",
+      "signatureVersion": null,
+      "outcome": "PASS",
+      "reasonCode": "CLEAN",
+      "severity": "INFO",
+      "confidence": "CONFIRMED",
+      "evidence": { "status": "CLEAN", "entryCount": 1 },
+      "scannedStorageVersionId": "v1-quarantine-version",
+      "scannedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scannedSize": 1024,
+      "durationMs": 15,
+      "createdAt": "2026-10-01T10:00:00.500Z"
+    },
+    {
+      "id": "018f3a5e-7a42-7000-8000-000000000011",
+      "checkId": "scanner.clamav",
+      "engine": "clamav",
+      "engineVersion": "1.4.6",
+      "signatureVersion": null,
+      "outcome": "PASS",
+      "reasonCode": "CLEAN",
+      "severity": "INFO",
+      "confidence": "CONFIRMED",
+      "evidence": { "status": "CLEAN" },
+      "scannedStorageVersionId": "v1-quarantine-version",
+      "scannedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scannedSize": 1024,
+      "durationMs": 45,
+      "createdAt": "2026-10-01T10:00:00.750Z"
+    },
+    {
+      "id": "018f3a5e-7a42-7000-8000-000000000012",
+      "checkId": "scanner.yara",
+      "engine": "yara-x",
+      "engineVersion": "1.20.0",
+      "signatureVersion": null,
+      "outcome": "PASS",
+      "reasonCode": "CLEAN",
+      "severity": "INFO",
+      "confidence": "CONFIRMED",
+      "evidence": { "status": "CLEAN", "matches": [] },
+      "scannedStorageVersionId": "v1-quarantine-version",
+      "scannedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scannedSize": 1024,
+      "durationMs": 20,
+      "createdAt": "2026-10-01T10:00:01.000Z"
+    }
+  ]
+}
+
+4. TEST EXECUTION SUMMARY
+--------------------------------------------------------------------------------
+Suite: tests/integration/api/p17-scans-api.test.ts (6/6 PASS)
+  - rejects unauthenticated requests with 401 Problem Details:               PASS
+  - rejects invalid UUID format with 400 Problem Details:                    PASS
+  - returns 404 Problem Details when scan job does not exist:                PASS
+  - enforces tenant application boundary (returns 403 when App B accesses A):PASS
+  - returns scan status and deterministically sorted findings for API key:   PASS
+  - allows access to scan job for authorized Dashboard User JWT:             PASS
+
+GATE VERDICT: FULL PASS
+================================================================================
