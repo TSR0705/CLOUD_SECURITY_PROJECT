@@ -113,6 +113,11 @@ export interface ArchiveInspectionResult {
   compressionRatio: number;
   maxNestingDepth: number;
   durationMs: number;
+  /**
+   * Process-level Resident Set Size (RSS) in bytes measured during inspection execution.
+   * Note: In Node.js, worker_threads share the host OS process memory space;
+   * this metric reflects the overall Node.js process RSS during worker execution.
+   */
   workerRssBytes: number;
   entries: ArchiveEntryInfo[];
   details?: Record<string, unknown> | undefined;

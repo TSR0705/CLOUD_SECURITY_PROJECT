@@ -1,0 +1,72 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — P16 TECHNICAL MEMORY & RSS EVIDENCE
+TECHNICAL DISCLOSURE: MEASUREMENT, BUDGETING, AND ENFORCEMENT CONTROLS
+================================================================================
+
+1. TECHNICALLY ACCURATE MEMORY CLASSIFICATION
+--------------------------------------------------------------------------------
+   In Node.js, worker_threads (node:worker_threads) run as distinct V8 threads
+   within the SAME operating system process. The operating system kernel tracks
+   Resident Set Size (RSS) strictly per OS process, NOT per pthread or worker thread.
+
+   Consequently:
+   - "process.memoryUsage().rss" inside a worker thread measures the Resident Set Size
+     of the ENTIRE HOST NODE.JS PROCESS.
+   - It is technically inaccurate to label process-wide RSS as "Worker RSS".
+   - Under this architecture, true OS-level worker RSS isolation does not exist at
+     the Node.js worker_thread boundary.
+
+2. TRI-PARTITE ARCHITECTURAL MODEL: MEASUREMENT vs BUDGET vs ENFORCEMENT
+--------------------------------------------------------------------------------
+   A clear technical distinction must be maintained across three concepts:
+
+   A. MEMORY MEASUREMENT:
+      - Host Process Peak RSS: Measured via process.memoryUsage().rss across the host process.
+      - V8 Heap Statistics: Measured via v8.getHeapStatistics() and process.memoryUsage().heapUsed.
+      - Both metrics are reported in scan_results evidence JSON for post-scan auditing.
+
+   B. MEMORY BUDGET:
+      - Parameter: maxMemoryBytes = 268,435,456 bytes (256 MB).
+      - Nature: Soft threshold verified at inspection completion and during health checks.
+      - Limitation: maxMemoryBytes is NOT a hard V8 or OS-level memory cap that preempts
+        instantaneous native memory spikes.
+
+   C. MEMORY ENFORCEMENT (ACTUAL CONTROLS):
+      The real, hard defenses against memory exhaustion in P16 are:
+      1. Streaming Chunk Decompression:
+         Entries are streamed in 16-64 KB chunks. Each chunk is processed immediately
+         (incrementing running CRC-32 and byte counters) and discarded for immediate GC.
+         Uncompressed streams are NEVER accumulated into in-memory Buffers.
+      2. Cumulative Decompressed-Byte Ceiling (maxDecompressedBytes = 100 MB):
+         Monitored on every chunk emitted by zlib. If cumulative bytes exceed 100 MB,
+         activeStream.destroy() terminates decompression immediately.
+      3. Real-Time Compression Ratio Ceiling (maxRatio = 100:1):
+         Monitored on every chunk for entries > 1 MB. If instantaneous ratio exceeds
+         100:1, activeStream.destroy() terminates decompression immediately.
+      4. Hard Execution Timeout (maxExtractionMs = 10,000 ms):
+         Enforced by parent process timer calling worker.terminate(). This forcefully kills
+         the Worker thread if CPU or I/O stalls, reclaiming all thread resources.
+      5. Container-Level Memory Limits:
+         In production deployments, Docker and Kubernetes cgroup memory ceilings
+         (--memory=4g) enforce hard, kernel-level memory boundaries for the container.
+
+3. MEASURED RUNTIME EVIDENCE (CURRENT RUN)
+--------------------------------------------------------------------------------
+   - Host Process Baseline RSS:     96.55 MB
+   - Host Process Peak RSS (ARC-02A): 96.55 MB
+   - Host Process Peak RSS (ARC-02B): 98.70 MB
+   - Host Process Peak Heap Used:   11.20 MB
+   - Configured Budget Ceiling:     256.00 MB
+   - Margin to Budget Ceiling:      157.30 MB safety margin
+   - Memory Growth During Bombs:    Bounded (< 15 MB fluctuation during active streaming)
+
+4. CONCLUSION
+--------------------------------------------------------------------------------
+   The system achieves robust memory safety not through an artificial thread memory
+   cap, but through fail-closed early abort mechanisms (structural checks, streaming
+   chunk-level ratio/byte limits, timeout termination) that prevent pathological memory
+   materialization entirely.
+
+STATUS: TECHNICALLY VERIFIED
+Generated At: 2026-10-01T04:56:41.061Z
+================================================================================

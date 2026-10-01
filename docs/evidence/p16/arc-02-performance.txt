@@ -1,43 +1,83 @@
 ================================================================================
-SECURE UPLOAD GATEWAY (SUG) — P16 PERFORMANCE EVIDENCE: arc-02
-HIGH-RATIO ZIP BOMB DEFENSE & BOUNDED RESOURCE CONSUMPTION
+SECURE UPLOAD GATEWAY (SUG) — P16 PERFORMANCE EVIDENCE: ARC-02
+HIGH-RATIO ZIP BOMB DEFENSE ACROSS BOTH CANONICAL DETECTION PATHS
 ================================================================================
 
-1. TEST OBJECT METRICS:
-   - Archive Input Size:            1147 bytes (1.12 KB)
-   - Declared Uncompressed Size:    1073741824 bytes (1.00 GB)
-   - Declared Compression Ratio:    936130.62:1
-   - Total Entries in Archive:      1
+1. OVERVIEW & SCOPE
+   This benchmark evaluates both detection paths required under canonical P16:
+   - ARC-02A: Metadata-level bomb intercepted during Phase 1 binary structural check
+   - ARC-02B: Streaming decompression bomb intercepted during Phase 2 real-time decompression
 
-2. RESOURCE BOUNDS & EXECUTION TIMING:
-   - Max Allowed Extraction Time:   10000 ms (10.00 s)
-   - Actual Elapsed Duration:       136.001 ms (0.1360 s)
-   - Verdict Duration SLA (< 10s):  PASS (Satisfied in 0.1360 s)
+================================================================================
+2. VARIANT ARC-02A: METADATA-DETECTABLE HIGH-RATIO BOMB
+================================================================================
+   Variant Name:                    ARC-02A: Metadata-Detectable High-Ratio Bomb
+   Attack Vector Description:       Archive declares 1 GB expansion and ~936,130:1 ratio in Central Directory; intercepted in Phase 1 structural validation before decompression.
 
-3. MEMORY CONSUMPTION & ISOLATION:
-   - Max Allowed Worker RSS:        268435456 bytes (256.00 MB)
-   - Measured Worker Peak RSS:      107081728 bytes (102.12 MB)
-   - Parent Process Initial RSS:    87076864 bytes (83.04 MB)
-   - Parent Process Final RSS:      106369024 bytes (101.44 MB)
-   - Verdict Memory SLA (< 256MB):  PASS (102.12 MB < 256 MB)
-
-4. DECOMPRESSION BOUNDS & DEFENSE MECHANISM:
-   - Actual Bytes Decompressed:     0 bytes
-   - Total 1 GB Decompressed?:      NO (Extraction halted immediately in Phase 1 / early Phase 2)
-   - Final Inspection Status:       REJECTED
+   MEASUREMENT METRICS:
+   - Archive Input Bytes:           1151 bytes (1.12 KB)
+   - Compressed Bytes Processed:    0 bytes
+   - Declared Uncompressed Bytes:   1073741824 bytes (1.00 GB)
+   - Actual Decompressed Bytes:     0 bytes (0 bytes extracted)
+   - Configured maxDecompressedBytes: 104857600 bytes (100.00 MB)
+   - Configured maxRatio:           100:1
+   - Elapsed Execution Time:        47.772 ms (0.0478 s)
+   - Host Process Peak RSS:         101240832 bytes (96.55 MB)
+   - Host Process Heap Used:        11614920 bytes (11.08 MB)
+   - Termination Reason:            "Entry 'bomb_a.dat' declared compression ratio 1039440.3:1 exceeds safety ceiling of 100:1"
    - Final Reason Code:             ARCHIVE_BOMB_DETECTED
-   - Detailed Rejection Reason:     "Entry 'bomb.dat' declared compression ratio 1039440.3:1 exceeds safety ceiling of 100:1"
-   - Assigned Finding Severity:     CRITICAL
-   - Finding Confidence:            CONFIRMED
+   - Final Result:                  REJECTED (Fail-Closed)
+   - Full 1 GB Materialized?:       NO (PROTECTED)
+   - Written to Disk?:              NO (0 bytes written)
 
-5. ACCEPTANCE GATE EVALUATION:
-   - Elapsed Time < 10,000 ms:      PASS
-   - Worker RSS < 256 MB:           PASS
-   - Full 1 GB Extracted:           NO (0 bytes unpacked, intercepted at boundary)
-   - Unbounded Memory Growth:       NO (Peak RSS bounded to isolated worker)
-   - Fail-Closed Disposition:       PASS (Status: REJECTED)
+   ACCEPTANCE GATE VERDICTS:
+   - Duration SLA (< 10,000 ms):    PASS (47.77 ms << 10,000 ms)
+   - Memory Bound (< 256 MB RSS):   PASS (96.55 MB < 256 MB)
+   - Fail-Closed Security Verdict:  PASS (Status: REJECTED, Reason: ARCHIVE_BOMB_DETECTED)
+
+================================================================================
+3. VARIANT ARC-02B: STREAMING DECOMPRESSION BOMB
+================================================================================
+   Variant Name:                    ARC-02B: Streaming Decompression Bomb
+   Attack Vector Description:       Archive declares safe 500 KB expansion and ~49:1 ratio in headers (passes Phase 1); real-time decompression ratio ceiling (100:1) detects explosion mid-stream and aborts immediately.
+
+   MEASUREMENT METRICS:
+   - Archive Input Bytes:           10335 bytes (10.09 KB)
+   - Compressed Bytes Processed:    10335 bytes
+   - Declared Uncompressed Bytes:   10485760 bytes (10.00 MB payload)
+   - Actual Decompressed Bytes:     1064960 bytes (~1.05 MB unpacked before stream abort)
+   - Configured maxDecompressedBytes: 104857600 bytes (100.00 MB)
+   - Configured maxRatio:           100:1
+   - Elapsed Execution Time:        55.285 ms (0.0553 s)
+   - Host Process Peak RSS:         103489536 bytes (98.70 MB)
+   - Host Process Heap Used:        11743816 bytes (11.20 MB)
+   - Termination Reason:            "Decompression ratio 104.4:1 exceeded maximum limit of 100:1 for entry 'stream_bomb_b.dat'"
+   - Final Reason Code:             COMPRESSION_RATIO_EXCEEDED
+   - Final Result:                  REJECTED (Fail-Closed)
+   - Full 10 MB Materialized?:      NO (PROTECTED - aborted mid-stream)
+   - Written to Disk?:              NO (0 bytes written)
+
+   ACCEPTANCE GATE VERDICTS:
+   - Duration SLA (< 10,000 ms):    PASS (55.29 ms << 10,000 ms)
+   - Memory Bound (< 256 MB RSS):   PASS (98.70 MB < 256 MB)
+   - Fail-Closed Security Verdict:  PASS (Status: REJECTED, Reason: COMPRESSION_RATIO_EXCEEDED)
+
+================================================================================
+4. COMPARATIVE ANALYSIS & SECURITY DISPOSITION
+================================================================================
+   | Metric                          | ARC-02A (Metadata Bomb)   | ARC-02B (Streaming Bomb)  |
+   |---------------------------------|---------------------------|---------------------------|
+   | Inspection Phase Intercept      | Phase 1 (Structural)      | Phase 2 (Streaming)       |
+   | Declared Compression Ratio      | ~936,130:1 (Exceeds 100:1)| ~49:1 (Passes Phase 1)    |
+   | Actual Runtime Ratio At Abort   | N/A (0 bytes decompressed)| > 100:1 detected in stream|
+   | Decompressed Bytes at Abort     | 0 bytes                   | 1064960 bytes (~1.05 MB)     |
+   | Execution Duration              | 47.77 ms                 | 55.29 ms                 |
+   | Host Process Peak RSS           | 96.55 MB                 | 98.70 MB                 |
+   | Decompression Stream Destroyed? | Not opened                | Immediately via destroy() |
+   | Materialized to Disk?           | NO                        | NO                        |
+   | Gate Verdict                    | FULL PASS                 | FULL PASS                 |
 
 GATE VERDICT: FULL PASS
-Generated At: 2026-10-01T04:10:27.036Z
-Node Environment: Node.js v24.14.0 (win32 x64)
+Generated At: 2026-10-01T04:56:41.059Z
+Runtime Environment: Node.js v24.14.0 (win32 x64)
 ================================================================================

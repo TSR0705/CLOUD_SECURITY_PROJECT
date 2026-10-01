@@ -111,13 +111,54 @@ If any limit is breached during either Phase 1 or Phase 2, inspection immediatel
 
 ---
 
-## 4. Worker Thread Isolation
+## 4. Execution Boundary, Memory Architecture & RSS Disclosure
 
-Archive inspection is isolated in a dedicated Node.js Worker Thread (`node:worker_threads`):
+### 4.1 Worker Thread Isolation
 
-1. **Memory Isolation**: The parent process (`services/scanner`) delegates archive parsing to the worker thread. Any memory spike from pathological archive structures is isolated.
-2. **Hard Timeout Enforcement**: The orchestrator (`inspectArchive()`) sets a timer for `maxExtractionMs`. If the worker does not complete within 10 seconds, `worker.terminate()` is called immediately, killing the execution context and returning an `ARCHIVE_TIMEOUT` rejection.
-3. **RSS Memory Gate**: The worker thread measures `process.memoryUsage().rss` and transmits it via message passing back to the orchestrator. If peak RSS exceeds 256 MB, it triggers `ARCHIVE_RESOURCE_EXHAUSTION`.
+Archive inspection executes within a dedicated Node.js Worker Thread (`node:worker_threads`):
+
+- **Execution Isolation**: Offloads CPU-intensive deflation and decompression away from the scanner event loop.
+- **Hard Timeout Enforcement**: The orchestrator (`inspectArchive()`) sets a timer for `maxExtractionMs` (10,000 ms). If the worker does not complete within 10 seconds, `worker.terminate()` is called immediately, killing the execution context and returning an `ARCHIVE_TIMEOUT` rejection.
+
+### 4.2 Technically Accurate Memory Classification
+
+In Node.js, `worker_threads` run as distinct V8 threads inside the **same operating system process**. The OS kernel tracks Resident Set Size (RSS) strictly at the OS process level, not per pthread/worker thread.
+
+Consequently:
+
+- `process.memoryUsage().rss` inside a worker thread measures the **Host Node.js Process Peak RSS**, not isolated worker memory.
+- Under Node.js, true OS-level worker RSS isolation does not exist at the thread boundary.
+
+### 4.3 Tri-Partite Model: Measurement vs Budget vs Enforcement
+
+A strict technical distinction is maintained across:
+
+1. **Memory Measurement**:
+   - Host Process Peak RSS: `process.memoryUsage().rss` measured across the host process.
+   - V8 Heap Statistics: `process.memoryUsage().heapUsed` and `v8.getHeapStatistics()`.
+   - Reported in scan findings JSON for post-scan auditing.
+
+2. **Memory Budget**:
+   - Parameter: `maxMemoryBytes = 256 MB` (`268,435,456` bytes).
+   - Nature: Soft threshold verified at inspection completion and during health checks.
+   - Reality: `maxMemoryBytes` is NOT an OS-level or V8-level hard memory limit that preemptively traps instantaneous native memory spikes.
+
+3. **Memory Enforcement (Actual Hard Controls)**:
+   The actual hard defenses preventing memory exhaustion are:
+   - **Streaming Chunk Decompression**: Entries are processed in 16–64 KB chunks. Each chunk is processed immediately for CRC-32 and byte counting and discarded for immediate garbage collection. Decompressed streams are never buffered into full-file Buffers.
+   - **Cumulative Decompressed-Byte Ceiling (`maxDecompressedBytes: 100 MB`)**: Monitored on every chunk emitted by zlib. If cumulative bytes exceed 100 MB, `activeStream.destroy()` terminates decompression immediately.
+   - **Real-Time Compression Ratio Ceiling (`maxRatio: 100:1`)**: Monitored on every chunk for entries > 1 MB. If instantaneous ratio exceeds 100:1, `activeStream.destroy()` terminates decompression immediately.
+   - **Hard Execution Timeout (`maxExtractionMs: 10,000 ms`)**: Enforced by parent timer calling `worker.terminate()`.
+   - **Container-Level Memory Limits**: In production deployments, Docker and Kubernetes cgroup memory ceilings (`--memory=4g`) enforce hard kernel-level memory boundaries.
+
+### 4.4 Nested Archive Non-Materialization Sanity
+
+- Recursive nested inspection is strictly lazy and budgeted.
+- The outer archive is never extracted in full.
+- Only the specific nested archive entry is streamed to a temporary file in `os.tmpdir()`.
+- Nested archives are inspected with cumulative uncompressed byte budgets and nesting depth propagated (`maxDepth: 3`).
+- Temporary nested files are immediately deleted in `finally` blocks upon completion.
+- Arbitrary directory trees are never materialized to disk.
 
 ---
 
@@ -150,23 +191,36 @@ In `services/scanner/src/worker.ts`:
 
 ## 7. Verification & Test Suite Matrix (`arc-01` – `arc-09`)
 
-| Test Code | Description               | Input Characteristic                                            | Expected Outcome    | Reason Code                     |
-| --------- | ------------------------- | --------------------------------------------------------------- | ------------------- | ------------------------------- |
-| `arc-01`  | Safe Normal Archive       | Clean Store (0) and Deflate (8) entries within budget           | `PASS` / `ACCEPTED` | `ARCHIVE_INSPECTION_PASSED`     |
-| `arc-02`  | High-Ratio ZIP Bomb       | Small file declaring > 1 GB uncompressed expansion              | `FAIL` / `REJECTED` | `ARCHIVE_BOMB_DETECTED`         |
-| `arc-03`  | Overlapping Ranges        | Fifield non-recursive zip bomb sharing deflated streams         | `FAIL` / `REJECTED` | `ARCHIVE_OVERLAPPING_ENTRIES`   |
-| `arc-04`  | Zip Slip & Path Traversal | Entries with `../`, `C:\`, UNC paths, `CON`/`PRN`/`NUL` devices | `FAIL` / `REJECTED` | `ARCHIVE_PATH_TRAVERSAL`        |
-| `arc-05`  | Encrypted Archive         | Archive with General Purpose Bit Flag 0 set                     | `FAIL` / `REJECTED` | `ARCHIVE_ENCRYPTED`             |
-| `arc-06`  | Symlink Entry             | Archive with Unix mode `0120000` symlink header                 | `FAIL` / `REJECTED` | `ARCHIVE_SYMLINK_DETECTED`      |
-| `arc-07`  | Nested Recursion Depth    | Nested ZIP archives exceeding depth 3                           | `FAIL` / `REJECTED` | `ARCHIVE_NESTED_DEPTH_EXCEEDED` |
-| `arc-08`  | Structural Anomalies      | Chameleon multiple EOCD, CD/LFH mismatch, corrupt CRC           | `FAIL` / `REJECTED` | `ARCHIVE_CORRUPTED`             |
-| `arc-09`  | OOXML Container Boundary  | Clean DOCX container passes P16 without macro execution         | `PASS` / `ACCEPTED` | `ARCHIVE_INSPECTION_PASSED`     |
+| Test Code | Description                         | Input Characteristic                                             | Expected Outcome    | Reason Code                     |
+| --------- | ----------------------------------- | ---------------------------------------------------------------- | ------------------- | ------------------------------- |
+| `arc-01`  | Safe Normal Archive                 | Clean Store (0) and Deflate (8) entries within budget            | `PASS` / `ACCEPTED` | `ARCHIVE_INSPECTION_PASSED`     |
+| `arc-02A` | Metadata High-Ratio ZIP Bomb        | Small file declaring > 1 GB uncompressed expansion in headers    | `FAIL` / `REJECTED` | `ARCHIVE_BOMB_DETECTED`         |
+| `arc-02B` | Streaming Decompression Bomb        | Small headers (passes Phase 1); stream expands mid-decompression | `FAIL` / `REJECTED` | `COMPRESSION_RATIO_EXCEEDED`    |
+| `arc-03`  | Nested Archive Depth Limit Exceeded | Nested ZIP archives exceeding depth 3                            | `FAIL` / `REJECTED` | `NESTED_ARCHIVE_DEPTH_EXCEEDED` |
+| `arc-04`  | Entry Count Limit Exceeded          | Archive with entries exceeding maxEntries (1,000)                | `FAIL` / `REJECTED` | `ENTRY_COUNT_EXCEEDED`          |
+| `arc-05`  | Overlapping Ranges (Fifield Bomb)   | Fifield non-recursive zip bomb sharing deflated streams          | `FAIL` / `REJECTED` | `OVERLAPPING_ENTRIES`           |
+| `arc-06`  | Lying Size / Stream Mismatch        | Archive entry with lying declared uncompressed size              | `FAIL` / `REJECTED` | `SIZE_MISMATCH`                 |
+| `arc-07`  | Zip Slip & Path Traversal           | Entries with `../`, `C:\`, UNC paths, `CON`/`PRN`/`NUL` devices  | `FAIL` / `REJECTED` | `ZIP_SLIP_DETECTED`             |
+| `arc-08`  | Encrypted Archive Rejection         | Archive with General Purpose Bit Flag 0 set                      | `FAIL` / `REJECTED` | `ENCRYPTED_ARCHIVE_FORBIDDEN`   |
+| `arc-09`  | Symlink Archive Rejection           | Archive with Unix mode `0120000` symlink header                  | `FAIL` / `REJECTED` | `SYMLINK_FORBIDDEN`             |
 
-### Benchmark Evidence:
+### Dual-Path Benchmark Evidence (`ARC-02`):
 
-The performance verification gate for `arc-02` is captured in `docs/evidence/p16/arc-02-performance.txt`:
+Detailed evidence is captured in `docs/evidence/p16/arc-02-performance.txt`, `docs/evidence/p16/archive-memory-rss.txt`, and `docs/evidence/p16/archive-test-summary.txt`:
 
-- **Elapsed Duration**: 136 ms (SLA: < 10,000 ms) — **PASS**
-- **Worker Peak RSS**: 102.12 MB (SLA: < 256 MB) — **PASS**
-- **Decompressed Bytes**: 0 bytes (halted at boundary) — **PASS**
-- **Disposition**: `REJECTED` fail-closed — **PASS**
+1. **ARC-02A (Metadata-Level High-Ratio Bomb)**:
+   - **Intercept**: Phase 1 binary structural check (before decompression)
+   - **Declared Expansion**: 1,073,741,824 bytes (1.00 GB, ~936,130:1 ratio)
+   - **Elapsed Duration**: 49.93 ms (SLA: < 10,000 ms) — **PASS**
+   - **Host Process Peak RSS**: 96.39 MB (SLA: < 256 MB) — **PASS**
+   - **Decompressed Bytes**: 0 bytes (halted before stream open) — **PASS**
+   - **Disposition**: `REJECTED` fail-closed (`ARCHIVE_BOMB_DETECTED`) — **PASS**
+
+2. **ARC-02B (Streaming Decompression Bomb)**:
+   - **Intercept**: Phase 2 controlled streaming decompression
+   - **Declared Expansion in Headers**: 500,000 bytes (~49:1 ratio, passes Phase 1)
+   - **Elapsed Duration**: 55.63 ms (SLA: < 10,000 ms) — **PASS**
+   - **Host Process Peak RSS**: 98.54 MB (SLA: < 256 MB) — **PASS**
+   - **Decompressed Bytes at Abort**: 1,064,960 bytes (~1.05 MB before stream abort) — **PASS**
+   - **Disposition**: `REJECTED` fail-closed (`COMPRESSION_RATIO_EXCEEDED`) — **PASS**
+   - **Full Expansion Materialized**: NO (Stream destroyed immediately via `destroy()`) — **PASS**

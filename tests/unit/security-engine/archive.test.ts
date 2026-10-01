@@ -36,6 +36,7 @@ import {
 import {
   buildZip,
   buildHighRatioZipBombFixture,
+  buildStreamingZipBombFixture,
   buildOverlappingZipFixture,
   buildCleanDocxFixture,
 } from '../../fixtures/archive-builder.js';
@@ -343,7 +344,7 @@ describe('P16 — Archive Inspection and Zip-Bomb Security', () => {
       expect(res.severity).toBe('HIGH');
     });
 
-    it('arc-02 PERFORMANCE GATE: high-ratio ZIP bomb completes in < 10s with worker RSS < 256 MB', async () => {
+    it('arc-02A PERFORMANCE GATE: metadata-level high-ratio ZIP bomb completes in < 10s with peak RSS < 256 MB', async () => {
       const bombBuf = buildHighRatioZipBombFixture();
       const filePath = await writeFixture('high-ratio-bomb.zip', bombBuf);
 
@@ -363,7 +364,7 @@ describe('P16 — Archive Inspection and Zip-Bomb Security', () => {
       // 1. Must complete under 10,000 ms (10 seconds)
       expect(elapsedMs).toBeLessThan(10_000);
 
-      // 2. Worker RSS must be below 256 MB
+      // 2. Process peak RSS must be below 256 MB
       expect(res.workerRssBytes).toBeLessThan(268_435_456);
 
       // 3. Must be REJECTED, never CLEAN
@@ -376,6 +377,75 @@ describe('P16 — Archive Inspection and Zip-Bomb Security', () => {
 
       // 4. Must NOT have extracted 1 GB
       expect(res.totalDecompressedBytes).toBeLessThan(104_857_600);
+    });
+
+    it('arc-02B PERFORMANCE GATE: streaming decompression bomb triggers Phase 2 budget abort', async () => {
+      const bombBuf = buildStreamingZipBombFixture();
+      const filePath = await writeFixture('streaming-bomb.zip', bombBuf);
+
+      // Verify that Phase 1 structural inspection considers this fixture valid
+      const structural = await inspectArchiveStructure(filePath, DEFAULT_ARCHIVE_BUDGET);
+      expect(structural.valid).toBe(true);
+      expect(structural.totalDeclaredUncompressed).toBe(500_000); // 500 KB declared
+
+      const start = Date.now();
+      const res = await inspectArchive({
+        filePath,
+        budget: {
+          maxRatio: 100, // 100:1 limit
+          maxUncompressedSize: 104_857_600, // 100 MB limit
+          maxExtractionMs: 10_000, // 10s budget
+          maxMemoryBytes: 268_435_456, // 256 MB budget
+        },
+      });
+      const elapsedMs = Date.now() - start;
+
+      // Acceptance criteria:
+      // 1. Must complete under 10,000 ms (10 seconds)
+      expect(elapsedMs).toBeLessThan(10_000);
+
+      // 2. Process peak RSS must be below 256 MB
+      expect(res.workerRssBytes).toBeLessThan(268_435_456);
+
+      // 3. Must be REJECTED, never CLEAN
+      expect(res.status).toBe('REJECTED');
+      expect([
+        'COMPRESSION_RATIO_EXCEEDED',
+        'UNCOMPRESSED_SIZE_EXCEEDED',
+        'ARCHIVE_BOMB_DETECTED',
+      ]).toContain(res.reasonCode);
+
+      // 4. Must NOT have materialized the full 10 MB payload!
+      expect(res.totalDecompressedBytes).toBeLessThan(10 * 1024 * 1024);
+      // And must have begun decompression (decompressed > 0 bytes before abort)
+      expect(res.totalDecompressedBytes).toBeGreaterThan(0);
+    });
+
+    it('nested archive sanity: cumulative uncompressed bytes budget propagates into nested archives without materializing directory trees', async () => {
+      // Inner zip contains 1.6 MB uncompressed (stored, ratio 1:1)
+      const innerZip = buildZip([
+        { name: 'inner1.txt', content: Buffer.alloc(800 * 1024, 'A'), method: 0 },
+        { name: 'inner2.txt', content: Buffer.alloc(800 * 1024, 'B'), method: 0 },
+      ]);
+      // Outer zip contains 1.0 MB uncompressed plus inner zip (stored, ratio 1:1)
+      const outerZip = buildZip([
+        { name: 'outer.txt', content: Buffer.alloc(1024 * 1024, 'C'), method: 0 },
+        { name: 'nested.zip', content: innerZip, method: 0 },
+      ]);
+      const filePath = await writeFixture('nested-cumulative-budget.zip', outerZip);
+
+      // Total uncompressed across nesting is ~2.6 MB. If budget is 2 MB:
+      const res = await inspectArchive({
+        filePath,
+        budget: {
+          maxUncompressedSize: 2 * 1024 * 1024, // 2 MB budget
+          maxDepth: 3,
+        },
+      });
+
+      expect(res.status).toBe('REJECTED');
+      expect(res.reasonCode).toBe('UNCOMPRESSED_SIZE_EXCEEDED');
+      expect(res.totalDecompressedBytes).toBeLessThan(3 * 1024 * 1024);
     });
   });
 });

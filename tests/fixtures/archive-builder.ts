@@ -171,6 +171,29 @@ export function buildHighRatioZipBombFixture(): Buffer {
 }
 
 /**
+ * Generates an adversarial streaming ZIP bomb (ARC-02B).
+ * Structurally valid ZIP whose headers declare safe size and ratio (passes Phase 1),
+ * but whose deflated stream expands to > 10 MB, causing Phase 2 streaming decompression
+ * to detect the ratio/size explosion and abort mid-stream without materializing the full expansion.
+ */
+export function buildStreamingZipBombFixture(): Buffer {
+  const tenMbZeros = Buffer.alloc(10 * 1024 * 1024, 0);
+  const compressedZeros = zlib.deflateRawSync(tenMbZeros);
+  const crc = zlib.crc32(tenMbZeros);
+
+  return buildZip([
+    {
+      name: 'stream_bomb.dat',
+      content: tenMbZeros,
+      method: 8,
+      customCompressedSize: compressedZeros.length,
+      customUncompressedSize: 500_000,
+      customCrc32: crc,
+    },
+  ]);
+}
+
+/**
  * Generates an adversarial Fifield non-recursive ZIP bomb with overlapping physical entry ranges.
  */
 export function buildOverlappingZipFixture(): Buffer {

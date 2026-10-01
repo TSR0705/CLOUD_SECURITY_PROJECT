@@ -123,7 +123,7 @@ export async function streamInspectArchive(
 
     yauzl.open(
       filePath,
-      { lazyEntries: true, autoClose: true, validateEntrySizes: true },
+      { lazyEntries: true, autoClose: true, validateEntrySizes: false },
       (openErr, zipfile) => {
         if (openErr || !zipfile) {
           const reasonMsg = openErr?.message || 'Failed to open ZIP file with yauzl';
@@ -521,6 +521,34 @@ export async function streamInspectArchive(
                   status: 'REJECTED',
                   reasonCode: 'CRC_MISMATCH',
                   reason: `CRC-32 checksum mismatch for entry '${entry.fileName}': expected 0x${entry.crc32.toString(16)}, computed 0x${(runningCrc >>> 0).toString(16)}`,
+                  severity: 'HIGH',
+                  confidence: 'CONFIRMED',
+                  entryCount: structuralResult.entryCount,
+                  totalCompressedBytes,
+                  totalDecompressedBytes: totalDecompressedBytes + entryDecompressed,
+                  compressionRatio:
+                    totalCompressedBytes > 0
+                      ? Number(
+                          (
+                            (totalDecompressedBytes + entryDecompressed) /
+                            totalCompressedBytes
+                          ).toFixed(2),
+                        )
+                      : 0,
+                  maxNestingDepth,
+                  durationMs: Date.now() - startTime,
+                  workerRssBytes: process.memoryUsage().rss,
+                  entries: structuralResult.entries,
+                });
+                return;
+              }
+
+              // 7. Validate actual decompressed byte count matches declared uncompressed size
+              if (entry.uncompressedSize > 0 && entryDecompressed !== entry.uncompressedSize) {
+                safeResolve({
+                  status: 'REJECTED',
+                  reasonCode: 'SIZE_MISMATCH',
+                  reason: `Entry '${entry.fileName}' actual decompressed bytes (${entryDecompressed}) does not match declared uncompressed size (${entry.uncompressedSize})`,
                   severity: 'HIGH',
                   confidence: 'CONFIRMED',
                   entryCount: structuralResult.entryCount,
