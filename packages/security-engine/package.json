@@ -11,6 +11,10 @@
   },
   "dependencies": {
     "@sug/shared": "workspace:*",
-    "file-type": "^22.1.1"
+    "file-type": "^22.1.1",
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@types/yauzl": "3.4.0"
   }
 }

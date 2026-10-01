@@ -77,3 +77,6 @@ export {
   type FileSizeValidationInput,
   GLOBAL_MAX_FILE_SIZE_BYTES,
 } from './size.js';
+
+// Archive Inspection Engine (P16 Two-Phase Safe ZIP / OOXML Inspection)
+export * from './archive/index.js';

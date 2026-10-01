@@ -1,0 +1,43 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — P16 PERFORMANCE EVIDENCE: arc-02
+HIGH-RATIO ZIP BOMB DEFENSE & BOUNDED RESOURCE CONSUMPTION
+================================================================================
+
+1. TEST OBJECT METRICS:
+   - Archive Input Size:            1147 bytes (1.12 KB)
+   - Declared Uncompressed Size:    1073741824 bytes (1.00 GB)
+   - Declared Compression Ratio:    936130.62:1
+   - Total Entries in Archive:      1
+
+2. RESOURCE BOUNDS & EXECUTION TIMING:
+   - Max Allowed Extraction Time:   10000 ms (10.00 s)
+   - Actual Elapsed Duration:       136.001 ms (0.1360 s)
+   - Verdict Duration SLA (< 10s):  PASS (Satisfied in 0.1360 s)
+
+3. MEMORY CONSUMPTION & ISOLATION:
+   - Max Allowed Worker RSS:        268435456 bytes (256.00 MB)
+   - Measured Worker Peak RSS:      107081728 bytes (102.12 MB)
+   - Parent Process Initial RSS:    87076864 bytes (83.04 MB)
+   - Parent Process Final RSS:      106369024 bytes (101.44 MB)
+   - Verdict Memory SLA (< 256MB):  PASS (102.12 MB < 256 MB)
+
+4. DECOMPRESSION BOUNDS & DEFENSE MECHANISM:
+   - Actual Bytes Decompressed:     0 bytes
+   - Total 1 GB Decompressed?:      NO (Extraction halted immediately in Phase 1 / early Phase 2)
+   - Final Inspection Status:       REJECTED
+   - Final Reason Code:             ARCHIVE_BOMB_DETECTED
+   - Detailed Rejection Reason:     "Entry 'bomb.dat' declared compression ratio 1039440.3:1 exceeds safety ceiling of 100:1"
+   - Assigned Finding Severity:     CRITICAL
+   - Finding Confidence:            CONFIRMED
+
+5. ACCEPTANCE GATE EVALUATION:
+   - Elapsed Time < 10,000 ms:      PASS
+   - Worker RSS < 256 MB:           PASS
+   - Full 1 GB Extracted:           NO (0 bytes unpacked, intercepted at boundary)
+   - Unbounded Memory Growth:       NO (Peak RSS bounded to isolated worker)
+   - Fail-Closed Disposition:       PASS (Status: REJECTED)
+
+GATE VERDICT: FULL PASS
+Generated At: 2026-10-01T04:10:27.036Z
+Node Environment: Node.js v24.14.0 (win32 x64)
+================================================================================
