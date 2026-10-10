@@ -675,7 +675,7 @@ describe('Phase P17: Format Checks & Findings Persistence DoD Suite', () => {
       expect(r.scanned_sha256.toString('hex')).toBe(sha1);
     }
 
-    // 4. Retry simulation: re-recording finding with different data does not mutate immutable findings
+    // 4. Retry with exact same artifact identity is idempotent and preserves findings
     await expect(
       worker.recordFinding({
         jobId,
@@ -687,12 +687,31 @@ describe('Phase P17: Format Checks & Findings Persistence DoD Suite', () => {
         severity: 'HIGH',
         confidence: 'CONFIRMED',
         evidence: { tampered: true },
-        storageVersionId: ver2Id, // Attempt to record V2 over existing V1 finding
+        storageVersionId: ver1Id, // Same verified storageVersionId
+        sha256Hex: sha1, // Same verified digest
+        sizeBytes: v1Pdf.length, // Same verified size
+        durationMs: 1,
+      }),
+    ).resolves.not.toThrow();
+
+    // 5. Retry with conflicting artifact identity fails closed and throws
+    await expect(
+      worker.recordFinding({
+        jobId,
+        fileVersionId: run1.job!.fileVersionId,
+        checkId: 'scanner.pdf',
+        engine: 'tampered-scanner',
+        outcome: 'FAIL',
+        reasonCode: 'ACTIVE_CONTENT_DETECTED',
+        severity: 'HIGH',
+        confidence: 'CONFIRMED',
+        evidence: { tampered: true },
+        storageVersionId: ver2Id, // Conflicting storageVersionId!
         sha256Hex: '0000000000000000000000000000000000000000000000000000000000000000',
         sizeBytes: 9999,
         durationMs: 1,
       }),
-    ).resolves.not.toThrow(); // ON CONFLICT DO NOTHING ignores stale update
+    ).rejects.toThrow(/Artifact identity conflict on scan job retry/);
 
     const results2 = await scannerPool.query(
       `SELECT check_id, scanned_storage_version_id, outcome, reason_code
@@ -705,7 +724,55 @@ describe('Phase P17: Format Checks & Findings Persistence DoD Suite', () => {
     expect(results2.rows[0].reason_code).toBe('CLEAN');
   });
 
-  it('proves immutable foreign-key relationship and forbid_mutation trigger on file_versions and scan_results', async () => {
+  it('fails closed on worker retry if pre-existing findings belong to a different artifact identity', async () => {
+    const cleanPdf = createCleanPdfBuffer();
+    const obj = await putTestObject(cleanPdf, 'retry-mismatch.pdf');
+    const { jobId, fileVersionId } = await createScanJobFixture({
+      objectKey: obj.key,
+      storageVersionId: obj.versionId,
+      sizeBytes: obj.size,
+      sha256Ingest: obj.sha256,
+    });
+
+    // Plant a pre-existing finding with mismatched artifact identity under this scan_job_id
+    await scannerPool.query(
+      `INSERT INTO scan_results (
+         scan_job_id, file_version_id, check_id, engine, engine_version,
+         outcome, reason_code, severity, confidence, evidence,
+         scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+       ) VALUES (
+         $1, $2, 'scanner.poisoned', 'poison', '1.0.0',
+         'PASS', 'CLEAN', 'INFO', 'CONFIRMED', '{}'::jsonb,
+         'different-storage-version', decode('0000000000000000000000000000000000000000000000000000000000000000', 'hex'),
+         999999, 10
+       )`,
+      [jobId, fileVersionId],
+    );
+
+    const worker = new ScannerWorker({
+      db: scannerPool,
+      storageProvider,
+      enableClamAv: false,
+      enableYara: false,
+      enableArchive: false,
+      enableFormatChecks: true,
+      tempDir: testTmpDir,
+    });
+
+    const { job, result } = await worker.runOnce();
+    expect(job?.id).toBe(jobId);
+    expect(result?.success).toBe(false);
+    expect(result?.error).toContain('Artifact identity conflict on scan retry');
+
+    // Scan job must have transitioned to DEAD due to finding conflict
+    const jobRes = await adminPool.query(`SELECT status, last_error FROM scan_jobs WHERE id = $1`, [
+      jobId,
+    ]);
+    expect(jobRes.rows[0].status).toBe('DEAD');
+    expect(jobRes.rows[0].last_error).toContain('Artifact identity conflict on scan retry');
+  });
+
+  it('proves immutable foreign-key relationship and forbid_mutation trigger on file_versions, scan_jobs, and scan_results', async () => {
     const cleanPdf = createCleanPdfBuffer();
     const obj = await putTestObject(cleanPdf, 'immutable.pdf');
     const { jobId, fileVersionId } = await createScanJobFixture({
@@ -757,7 +824,32 @@ describe('Phase P17: Format Checks & Findings Persistence DoD Suite', () => {
       adminPool.query(`DELETE FROM file_versions WHERE id = $1`, [fileVersionId]),
     ).rejects.toThrow(/append-only/i);
 
-    // 3. Verify scan_results is append-only: UPDATE or DELETE must fail closed
+    // 3. Verify scan_jobs.file_version_id is immutable: UPDATE must fail closed
+    const otherFvId = crypto.randomUUID();
+    await expect(
+      adminPool.query(`UPDATE scan_jobs SET file_version_id = $1 WHERE id = $2`, [
+        otherFvId,
+        jobId,
+      ]),
+    ).rejects.toThrow(/scan_jobs.file_version_id is immutable/i);
+
+    // 4. Verify scan_results.file_version_id cannot be switched to a mismatched file_version_id
+    await expect(
+      scannerPool.query(
+        `INSERT INTO scan_results (
+           scan_job_id, file_version_id, check_id, engine, engine_version,
+           outcome, reason_code, severity, confidence, evidence,
+           scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+         ) VALUES (
+           $1, $2, 'scanner.fake_fv', 'fake', '1.0.0',
+           'PASS', 'CLEAN', 'INFO', 'CONFIRMED', '{}'::jsonb,
+           $3, decode($4, 'hex'), $5, 10
+         )`,
+        [jobId, fixtures.fileVersionId, obj.versionId, obj.sha256, obj.size], // using fixtures.fileVersionId != jobId's fileVersionId
+      ),
+    ).rejects.toThrow(/scan_results.file_version_id does not match scan_jobs.file_version_id/i);
+
+    // 5. Verify scan_results is append-only: UPDATE or DELETE must fail closed
     await expect(
       adminPool.query(`UPDATE scan_results SET outcome = 'FAIL' WHERE scan_job_id = $1`, [jobId]),
     ).rejects.toThrow(/append-only/i);

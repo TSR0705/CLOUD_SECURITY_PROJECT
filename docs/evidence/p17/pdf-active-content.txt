@@ -24,12 +24,11 @@ Monitored Active Content Keywords:
 1. Container CLI Normalization:
    - Command: qpdf --qdf --object-streams=disable <input.pdf> <normalized.pdf>
    - Uncompresses object streams and linearizes PDF structure into human-readable QDF.
-   - Verified inside the production scanner container:
+   - Pinned and verified inside the production scanner container:
        $ docker build -t sug-scanner:test -f services/scanner/Dockerfile .
        $ docker run --rm sug-scanner:test qpdf --version
        qpdf version 11.3.0
-   - Execution Timeout: 15,000 ms.
-   - Max Buffer: 50 MB.
+       Run qpdf --copyright to see copyright and license information.
 
 2. Strict Fail-Closed Guarantees:
    - Malformed PDF:
@@ -38,43 +37,82 @@ Monitored Active Content Keywords:
        outcome: 'ERROR'
        reasonCode: 'PDF_MALFORMED'
    - Timeout:
-     If qpdf hangs or exceeds timeout (15s):
+     If qpdf hangs or exceeds timeout:
        outcome: 'ERROR'
        reasonCode: 'PDF_NORMALIZATION_FAILED'
        evidence: { timedOut: true, status: 'NORMALIZATION_FAILED' }
-   - Unexpected Crash / Execution Error:
-     If qpdf exits with non-zero code other than 0 or 3 (warnings):
+   - Unexpected Crash / Process Error:
+     If qpdf exits with non-zero exit code:
        outcome: 'ERROR'
        reasonCode: 'PDF_NORMALIZATION_FAILED'
    - Missing / Damaged End-of-File:
-     In fallback / stream mode, missing `%%EOF` marker returns:
+     In stream mode, missing `%%EOF` marker returns:
        outcome: 'ERROR'
        reasonCode: 'PDF_MALFORMED'
    - INVARIANT:
      Errors during normalization NEVER fall through or become clean results.
 
-3. In-Process Stream Fallback:
-   - FlateDecode stream extraction via zlib.inflateSync / zlib.inflateRawSync.
-   - Per-stream expansion limit: 10 MB. Cumulative limit: 50 MB (guards against PDF Flate bombs).
-   - Hex-encoded name normalization: resolves escapes such as:
-     /#4a#61#76#61#53#63#72#69#70#74 -> /JavaScript
-
-3. TEST EXECUTION & EVIDENCE MATRIX (scan-04)
+3. OBSERVABLE SCANNER CONTAINER EXECUTION TRANSCRIPT
 --------------------------------------------------------------------------------
-Test Case                              Engine        Outcome  Reason Code               Evidence Details
---------------------------------------------------------------------------------------------------------------------------------------
-Clean Benign PDF (synthetic 1.4)       pdf-scanner   PASS     CLEAN                     0 active keywords detected
-Clean PDF with qpdf normalization      qpdf          PASS     CLEAN                     normalized: true, 0 active keywords
-Raw /JavaScript Action                 pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   /JavaScript detected
-Process Invocation (/Launch)           pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   /Launch, /OpenAction detected
-Hex-Escaped Scripting (/#4a#61...)     pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   /JavaScript normalized & detected
-FlateDecode Compressed Stream          pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   /JavaScript in decompressed stream
-Corrupted / Missing %PDF- Header       pdf-scanner   ERROR    PDF_MALFORMED             Missing %PDF- header
-Missing %%EOF Marker (Truncated PDF)   pdf-scanner   ERROR    PDF_MALFORMED             Missing %%EOF trailer
-QPDF Malformed (Exit Code 2)           qpdf          ERROR    PDF_MALFORMED             qpdf damaged PDF error
-QPDF Timeout Exceeded                  qpdf          ERROR    PDF_NORMALIZATION_FAILED  timedOut: true
-QPDF Fatal Crash (Exit Code 1)         qpdf          ERROR    PDF_NORMALIZATION_FAILED  qpdf process failure
-Quarantine End-to-End Pipeline         pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   ArtifactIdentity verified, scan_results persisted
+Invocation:
+  $ docker run --rm sug-scanner:test node scripts/verify-p17-pdf.mjs
+
+Actual Container Output:
+  === P17 OBSERVABLE PDF NORMALIZATION & DETECTION VERIFICATION ===
+
+  [CASE 1: CLEAN PDF]
+    Engine:     qpdf
+    Outcome:    PASS
+    Reason:     CLEAN
+    Keywords:   []
+    Normalized: true
+    Verdict:    VERIFIED PASS
+
+  [CASE 2: ACTIVE CONTENT PDF]
+    Engine:     qpdf
+    Outcome:    FAIL
+    Reason:     ACTIVE_CONTENT_DETECTED
+    Keywords:   ["/JavaScript","/JS","/OpenAction"]
+    Verdict:    VERIFIED DETECTED
+
+  [CASE 3: MALFORMED / CORRUPTED PDF]
+    Engine:     qpdf
+    Outcome:    ERROR
+    Reason:     PDF_MALFORMED
+    Error:      WARNING: /tmp/pdf-verify-GZ84HX/malformed.pdf: file is damaged
+  WARNING: /tmp/pdf-verify-GZ84HX/malformed.pdf: can't find startxref
+  WARNING: /tmp/pdf-verify-GZ84HX/malformed.pdf: Attempting to reconstruct cross-reference table
+  qpdf: /tmp/pdf-verify-GZ84HX/malformed.pdf: unable to find trailer dictionary while recovering damaged file
+
+    Verdict:    VERIFIED FAIL-CLOSED
+
+  [CASE 4: TRUNCATED PDF MISSING %%EOF]
+    Engine:     qpdf
+    Outcome:    ERROR
+    Reason:     PDF_MALFORMED
+    Error:      WARNING: /tmp/sug-pdf-KSjPq5/input.pdf: file is damaged
+  WARNING: /tmp/sug-pdf-KSjPq5/input.pdf: can't find startxref
+  WARNING: /tmp/sug-pdf-KSjPq5/input.pdf: Attempting to reconstruct cross-reference table
+  qpdf: /tmp/sug-pdf-KSjPq5/input.pdf: unable to find trailer dictionary while recovering damaged file
+
+    Verdict:    VERIFIED FAIL-CLOSED
+
+  [CASE 5: QPDF TIMEOUT]
+    Engine:     qpdf
+    Outcome:    ERROR
+    Reason:     PDF_NORMALIZATION_FAILED
+    TimedOut:   true
+    Verdict:    VERIFIED FAIL-CLOSED
+
+  [CASE 6: QPDF PROCESS CRASH / ERROR]
+    Engine:     qpdf
+    Outcome:    ERROR
+    Reason:     PDF_NORMALIZATION_FAILED
+    Error:      qpdf fatal error: process crash
+
+    Verdict:    VERIFIED FAIL-CLOSED
+
+  === ALL 6 CASES VERIFIED: ERRORS NEVER FALL THROUGH TO CLEAN ===
 
 4. ARTIFACT IDENTITY BINDING EVIDENCE
 --------------------------------------------------------------------------------
@@ -95,4 +133,4 @@ Result:
   scanned_size:               <Matching byte count>
 
 GATE VERDICT: FULL PASS (scan-04)
-================================================================================
+===============================================================================

@@ -228,6 +228,40 @@ export class ScannerWorker {
     sizeBytes: number;
     durationMs: number;
   }): Promise<void> {
+    const existing = await this.db.query<{
+      file_version_id: string;
+      scanned_storage_version_id: string;
+      scanned_sha256: Buffer | string;
+      scanned_size: string | number;
+    }>(
+      `SELECT file_version_id, scanned_storage_version_id, scanned_sha256, scanned_size
+       FROM scan_results
+       WHERE scan_job_id = $1 AND check_id = $2`,
+      [params.jobId, params.checkId],
+    );
+
+    if (existing.rows.length > 0) {
+      const row = existing.rows[0]!;
+      const existingSha = Buffer.isBuffer(row.scanned_sha256)
+        ? row.scanned_sha256.toString('hex').toLowerCase()
+        : String(row.scanned_sha256)
+            .replace(/^(?:0x|\\x)/i, '')
+            .toLowerCase();
+
+      if (
+        row.file_version_id !== params.fileVersionId ||
+        row.scanned_storage_version_id !== params.storageVersionId ||
+        existingSha !== params.sha256Hex.toLowerCase() ||
+        Number(row.scanned_size) !== params.sizeBytes
+      ) {
+        throw new Error(
+          `Artifact identity conflict on scan job retry: existing finding for check '${params.checkId}' belongs to a different artifact identity (file_version_id=${row.file_version_id}, storage_version_id=${row.scanned_storage_version_id}, sha256=${existingSha}) than current scan attempt (file_version_id=${params.fileVersionId}, storage_version_id=${params.storageVersionId}, sha256=${params.sha256Hex})`,
+        );
+      }
+      // Exact same artifact identity: idempotent retry, preserve existing finding
+      return;
+    }
+
     await this.db.query(
       `INSERT INTO scan_results (
          scan_job_id, file_version_id, check_id, engine, engine_version,
@@ -481,7 +515,51 @@ export class ScannerWorker {
         };
       }
 
-      // 6. Identity matches! Persist canonical placeholder finding
+      // 6. Identity matches! Check that any pre-existing findings on retry match the verified identity
+      const priorFindings = await this.db.query<{
+        check_id: string;
+        file_version_id: string;
+        scanned_storage_version_id: string;
+        scanned_sha256: Buffer | string;
+        scanned_size: string | number;
+      }>(
+        `SELECT check_id, file_version_id, scanned_storage_version_id, scanned_sha256, scanned_size
+         FROM scan_results WHERE scan_job_id = $1`,
+        [job.id],
+      );
+
+      for (const prior of priorFindings.rows) {
+        const priorSha = Buffer.isBuffer(prior.scanned_sha256)
+          ? prior.scanned_sha256.toString('hex').toLowerCase()
+          : String(prior.scanned_sha256)
+              .replace(/^(?:0x|\\x)/i, '')
+              .toLowerCase();
+
+        if (
+          prior.file_version_id !== job.fileVersionId ||
+          prior.scanned_storage_version_id !== storageVersionId ||
+          priorSha !== calculatedSha256 ||
+          Number(prior.scanned_size) !== calculatedSize
+        ) {
+          const conflictReason = `Artifact identity conflict on scan retry: pre-existing finding for check '${prior.check_id}' belongs to mismatched artifact identity; failing closed`;
+          this.logger.error(conflictReason, { jobId: job.id, priorFinding: prior });
+          await failScanJob(this.db, job.id, {
+            workerId: this.workerId,
+            error: new Error(conflictReason),
+            retryable: false,
+            now: this.now,
+          });
+          return {
+            success: false,
+            verified: false,
+            sha256: calculatedSha256,
+            size: calculatedSize,
+            error: conflictReason,
+          };
+        }
+      }
+
+      // Persist canonical placeholder finding
       await this.db.query(
         `INSERT INTO scan_results (
            scan_job_id, file_version_id, check_id, engine, engine_version,
@@ -491,7 +569,8 @@ export class ScannerWorker {
            $1, $2, 'scanner.skeleton', 'scanner.skeleton', '0.1.0',
            'PASS', 'IDENTITY_VERIFIED', 'INFO', 'CONFIRMED', $3::jsonb,
            $4, $5, $6, $7
-         )`,
+         )
+         ON CONFLICT (scan_job_id, check_id) DO NOTHING`,
         [
           job.id,
           job.fileVersionId,

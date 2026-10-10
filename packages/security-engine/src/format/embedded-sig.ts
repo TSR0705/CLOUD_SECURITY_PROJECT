@@ -42,24 +42,55 @@ function isValidEmbeddedPe(buffer: Buffer, offset: number): boolean {
 }
 
 /**
- * Validates whether an ELF header at offset has standard e_ident values.
+ * Validates whether an ELF header at offset has standard e_ident and e_type values.
  */
 function isValidEmbeddedElf(buffer: Buffer, offset: number): boolean {
-  if (offset + 16 > buffer.length) return false;
+  if (offset + 18 > buffer.length) return false;
   const eiClass = buffer[offset + 4]; // 1 = 32-bit, 2 = 64-bit
   const eiData = buffer[offset + 5]; // 1 = LE, 2 = BE
   const eiVersion = buffer[offset + 6]; // 1 = current
 
-  return (eiClass === 1 || eiClass === 2) && (eiData === 1 || eiData === 2) && eiVersion === 1;
+  if ((eiClass !== 1 && eiClass !== 2) || (eiData !== 1 && eiData !== 2) || eiVersion !== 1) {
+    return false;
+  }
+
+  const isLe = eiData === 1;
+  const eType = isLe ? buffer.readUInt16LE(offset + 16) : buffer.readUInt16BE(offset + 16);
+  // Standard ELF e_type: ET_REL (1), ET_EXEC (2), ET_DYN (3), ET_CORE (4)
+  return eType >= 1 && eType <= 4;
 }
 
 /**
- * Validates whether a Mach-O header at offset is plausible.
+ * Validates whether a Mach-O header at offset is plausible and structurally consistent.
  */
 function isValidEmbeddedMacho(buffer: Buffer, offset: number): boolean {
   if (offset + 16 > buffer.length) return false;
-  const slice = buffer.subarray(offset, offset + 4);
-  return MACHO_MAGICS.some((magic) => slice.equals(magic));
+  const magic = buffer.subarray(offset, offset + 4);
+
+  const is32Le = magic.equals(Buffer.from([0xce, 0xfa, 0xed, 0xfe]));
+  const is32Be = magic.equals(Buffer.from([0xfe, 0xed, 0xfa, 0xce]));
+  const is64Le = magic.equals(Buffer.from([0xcf, 0xfa, 0xed, 0xfe]));
+  const is64Be = magic.equals(Buffer.from([0xfe, 0xed, 0xfa, 0xcf]));
+  const isFatBe = magic.equals(Buffer.from([0xca, 0xfe, 0xba, 0xbe]));
+
+  if (!is32Le && !is32Be && !is64Le && !is64Be && !isFatBe) {
+    return false;
+  }
+
+  if (isFatBe) {
+    const nfatArch = buffer.readUInt32BE(offset + 4);
+    return nfatArch >= 1 && nfatArch <= 64;
+  }
+
+  const isLe = is32Le || is64Le;
+  const cpuType = isLe ? buffer.readUInt32LE(offset + 4) : buffer.readUInt32BE(offset + 4);
+  const fileType = isLe ? buffer.readUInt32LE(offset + 12) : buffer.readUInt32BE(offset + 12);
+
+  // Common Mach-O CPU types: x86 (7), x86_64 (0x01000007), ARM (12), ARM64 (0x0100000c), PowerPC (18), PPC64 (0x01000012)
+  const validCpuTypes = new Set([7, 0x01000007, 12, 0x0100000c, 18, 0x01000012]);
+  const validFileType = fileType >= 1 && fileType <= 12;
+
+  return validCpuTypes.has(cpuType) && validFileType;
 }
 
 /**

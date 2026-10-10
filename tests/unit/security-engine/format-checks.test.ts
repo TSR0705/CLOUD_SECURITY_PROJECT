@@ -339,11 +339,71 @@ describe('P17 Format Checks Unit Suite', () => {
       expect(result.format).toBe('gif');
       expect(result.trailingBytesCount).toBeGreaterThan(0);
     });
+
+    it('exhibits restraint: returns PASS/CLEAN for JPEG with permissible trailing whitespace under 32 bytes', async () => {
+      const cleanJpeg = createCleanJpegBuffer();
+      // Append 8 bytes of trailing whitespace (\r\n\r\n\r\n\r\n) commonly added by web servers / formatters
+      const jpegWithWhitespace = Buffer.concat([
+        cleanJpeg,
+        Buffer.from('\r\n\r\n\r\n\r\n', 'ascii'),
+      ]);
+      const result = await inspectImageTrailing({ buffer: jpegWithWhitespace });
+
+      expect(result.outcome).toBe('PASS');
+      expect(result.reasonCode).toBe('CLEAN');
+      expect(result.format).toBe('jpeg');
+    });
   });
 
   describe('Embedded Executable Signature Check', () => {
     it('returns PASS/CLEAN for clean buffer without executable headers', async () => {
       const buffer = Buffer.from('Plain text file with no executable headers');
+      const result = await inspectEmbeddedSignatures({ buffer });
+
+      expect(result.outcome).toBe('PASS');
+      expect(result.reasonCode).toBe('CLEAN');
+      expect(result.matches).toHaveLength(0);
+    });
+
+    it('exhibits restraint: returns PASS/CLEAN for benign text containing ASCII "MZ" without valid PE structure', async () => {
+      const buffer = Buffer.from(
+        'This document mentions that the MZ header was designed by Mark Zbikowski in 1980.',
+      );
+      const result = await inspectEmbeddedSignatures({ buffer });
+
+      expect(result.outcome).toBe('PASS');
+      expect(result.reasonCode).toBe('CLEAN');
+      expect(result.matches).toHaveLength(0);
+    });
+
+    it('exhibits restraint: returns PASS/CLEAN for benign buffer containing "\x7fELF" with invalid ELF ident', async () => {
+      const buffer = Buffer.alloc(128);
+      buffer.fill(0x20);
+      buffer[16] = 0x7f;
+      buffer[17] = 0x45; // 'E'
+      buffer[18] = 0x4c; // 'L'
+      buffer[19] = 0x46; // 'F'
+      buffer[20] = 0x99; // invalid ei_class
+      buffer[21] = 0x99; // invalid ei_data
+      buffer[22] = 0x00; // invalid ei_version (0)
+
+      const result = await inspectEmbeddedSignatures({ buffer });
+
+      expect(result.outcome).toBe('PASS');
+      expect(result.reasonCode).toBe('CLEAN');
+      expect(result.matches).toHaveLength(0);
+    });
+
+    it('exhibits restraint: returns PASS/CLEAN for benign buffer containing Mach-O magic bytes without valid Mach-O structure', async () => {
+      const buffer = Buffer.alloc(128);
+      buffer.fill(0x20); // ASCII spaces
+      // Put Mach-O magic at offset 32 but followed by arbitrary text
+      buffer[32] = 0xcf;
+      buffer[33] = 0xfa;
+      buffer[34] = 0xed;
+      buffer[35] = 0xfe;
+      // cputype and filetype remain 0x20202020 (invalid)
+
       const result = await inspectEmbeddedSignatures({ buffer });
 
       expect(result.outcome).toBe('PASS');

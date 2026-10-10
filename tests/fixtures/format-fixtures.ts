@@ -278,6 +278,7 @@ export function createEmbeddedElfBuffer(offset: number = 128): Buffer {
   buf[offset + 4] = 2; // 64-bit
   buf[offset + 5] = 1; // little-endian
   buf[offset + 6] = 1; // version 1
+  buf.writeUInt16LE(2, offset + 16); // e_type = ET_EXEC (2)
 
   return buf;
 }
@@ -294,6 +295,13 @@ export function createEmbeddedMachoBuffer(offset: number = 64): Buffer {
   buf[offset + 1] = 0xfa;
   buf[offset + 2] = 0xed;
   buf[offset + 3] = 0xfe;
+  buf.writeUInt32LE(0x01000007, offset + 4); // CPU_TYPE_X86_64
+  buf.writeUInt32LE(0x00000003, offset + 8); // CPU_SUBTYPE_X86_64_ALL
+  buf.writeUInt32LE(0x00000002, offset + 12); // MH_EXECUTE
+  buf.writeUInt32LE(0x00000001, offset + 16); // ncmds = 1
+  buf.writeUInt32LE(0x00000038, offset + 20); // sizeofcmds = 56
+  buf.writeUInt32LE(0x00200085, offset + 24); // flags
+  buf.writeUInt32LE(0x00000000, offset + 28); // reserved
 
   return buf;
 }

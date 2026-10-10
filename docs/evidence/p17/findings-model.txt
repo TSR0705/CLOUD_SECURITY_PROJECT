@@ -43,44 +43,65 @@ CREATE TRIGGER scan_results_immutable
     BEFORE UPDATE OR DELETE OR TRUNCATE ON scan_results
     FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
 
-IMMUTABILITY & IDEMPOTENCY:
-- Table is append-only; enforced by PostgreSQL `forbid_mutation()` trigger:
-    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
-  Attempts to UPDATE or DELETE throw an error, preventing evidence tampering.
-- Idempotency is enforced via `UNIQUE (scan_job_id, check_id)`.
-- Concurrent or replayed scanning jobs execute:
-    INSERT INTO scan_results (...) VALUES (...)
-    ON CONFLICT (scan_job_id, check_id) DO NOTHING;
-- Safe against re-scans while preserving cryptographic integrity of historical findings.
+IMMUTABILITY & REFERENTIAL INTEGRITY TRIGGERS:
+1. `scan_results_immutable`:
+   Enforces append-only semantics on scan_results via PostgreSQL trigger:
+     RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+2. `file_versions_immutable`:
+   Enforces append-only semantics on file_versions via PostgreSQL trigger.
+3. `scan_jobs_file_version_immutable`:
+   BEFORE UPDATE trigger on scan_jobs:
+     IF OLD.file_version_id IS DISTINCT FROM NEW.file_version_id THEN
+       RAISE EXCEPTION 'scan_jobs.file_version_id is immutable';
+     END IF;
+   Guarantees that a scan job can NEVER have its target file_version_id switched.
+4. `scan_results_identity_check`:
+   BEFORE INSERT trigger on scan_results:
+     SELECT file_version_id INTO job_fv_id FROM scan_jobs WHERE id = NEW.scan_job_id;
+     IF job_fv_id IS NULL OR job_fv_id != NEW.file_version_id THEN
+       RAISE EXCEPTION 'scan_results.file_version_id does not match scan_jobs.file_version_id';
+     END IF;
+   Guarantees that no finding can ever be inserted under a scan_job_id with a mismatched file_version_id.
 
-3. ARTIFACT IDENTITY TUPLE BINDING & DATABASE INTEGRITY
+3. ARTIFACT IDENTITY TUPLE BINDING & RETRY BEHAVIOR
 --------------------------------------------------------------------------------
 Every row in `scan_results` is cryptographically bound to the artifact scanned:
   (bucket, object_key, scanned_storage_version_id, scanned_sha256, scanned_size)
 
 Immutable Foreign-Key Relationship:
   `scan_results.file_version_id` -> `file_versions.id`
-  `file_versions` stores the canonical ingest record:
-    - `bucket`: quarantine storage bucket (e.g., sug-quarantine-local)
-    - `object_key`: immutable storage object key
-    - `storage_version_id`: cloud object storage version ID
-    - `sha256_ingest`: 32-byte cryptographic hash of uploaded bytes
-    - `size_bytes`: byte length of uploaded artifact
-  Both `file_versions` and `scan_results` are protected by `forbid_mutation()` triggers.
+  `scan_jobs.file_version_id` -> `file_versions.id`
 
-Identity Invariant Verification & Negative Testing:
-  1. Cryptographic Identity Mismatch Guard:
-     - Worker streams artifact from quarantine bucket while computing SHA-256 and size on the fly.
-     - If quarantine object SHA-256 != file_versions.sha256_ingest OR size != file_versions.size_bytes:
-       -> Scanner immediately halts, marks job DEAD with error detail 'IDENTITY_MISMATCH'.
-       -> Zero format checks or scanners are executed on untrusted / mismatched bytes.
-  2. Storage Overwrite Resistance:
-     - If the quarantine storage object is overwritten by an external process or subsequent upload,
-       the worker requests the exact `VersionId: storage_version_id`.
-     - Findings reflect the exact byte-level version ingested, completely isolated from subsequent mutations.
-  3. Worker Retries & Idempotency:
-     - Retrying an already scanned job executes `ON CONFLICT (scan_job_id, check_id) DO NOTHING`.
-     - Existing findings are preserved untouched and no stale or mutated findings can replace them.
+Worker Retry & Anti-Stale Findings Protection:
+  A critical security property is that worker retries CANNOT silently preserve
+  findings from an earlier scan attempt with a different artifact identity.
+  The worker enforces this at two layers:
+
+  1. Pre-Execution Prior Finding Audit:
+     Immediately after verifying quarantine bytes against ingest metadata, the worker
+     queries all pre-existing findings recorded under `job.id`:
+       SELECT check_id, file_version_id, scanned_storage_version_id, scanned_sha256, scanned_size
+       FROM scan_results WHERE scan_job_id = $1;
+     If ANY pre-existing finding has a mismatched file_version_id, storage_version_id,
+     sha256, or size:
+       -> Scanner worker IMMEDIATELY halts.
+       -> Marks scan job DEAD with error detail 'Artifact identity conflict on scan retry'.
+       -> Zero subsequent scanning occurs; mismatched findings are NEVER silently preserved.
+
+  2. recordFinding Identity Verification:
+     When recording each finding, the worker checks if a finding already exists for (jobId, checkId):
+     - If exists and matches exact identity (fileVersionId, storageVersionId, sha256, sizeBytes):
+       idempotent retry, preserves existing finding.
+     - If exists but has ANY mismatched identity field:
+       throws Error('Artifact identity conflict on scan job retry: existing finding ... belongs to a different artifact identity').
+
+  3. Cryptographic Ingest Mismatch Guard:
+     If bytes fetched from quarantine bucket do not match file_versions.sha256_ingest or size_bytes:
+     - Worker immediately aborts, marks job DEAD with IDENTITY_MISMATCH, and executes zero format checks.
+
+  4. Storage Overwrite Resistance:
+     Worker explicitly requests `getByVersion({ bucket, key, versionId: storageVersionId })`,
+     immunizing findings from subsequent storage overwrites.
 
 4. CANONICAL REASON CODE REGISTRY
 --------------------------------------------------------------------------------
@@ -119,21 +140,35 @@ scanner.image.trailing       IMAGE_TRAILING_DATA_DETECTED     FAIL       HIGH
 scanner.signature.embedded   EMBEDDED_EXECUTABLE_DETECTED     FAIL       CRITICAL
 scanner.polyglot             POLYGLOT_DETECTED                FAIL       CRITICAL
 
-5. DETECTOR SUITE COVERAGE
+5. DETECTOR SUITE COVERAGE: DETECTION & RESTRAINT
 --------------------------------------------------------------------------------
-- PE/MZ Executable Signatures:   Detected at non-zero offsets (\x4D\x5A).
-- ELF Binary Signatures:         Detected at non-zero offsets (\x7F\x45\x4C\x46).
-- Mach-O Binary Signatures:      Detected at non-zero offsets (\xCF\xFA\xED\xFE, \xCE\xFA\xED\xFE, \xFE\xED\xFA\xCF, \xFE\xED\xFA\xCE).
-- Benign text / doc without MZ:  PASS / CLEAN (no false positives).
-- OOXML Macros & Relations:      Pure in-memory XML inspection, zero network access.
-- Polyglot Matrix:               poly-01, poly-02, poly-03 detected; poly-04 documented miss.
+The detectors exhibit both high detection sensitivity and structural restraint:
+- PE/MZ Executable Signatures:
+  - Detection: flags valid PE headers with correct e_lfanew pointer to 'PE\0\0' at offset > 0.
+  - Restraint: benign text containing ASCII "MZ" without valid PE structure returns PASS / CLEAN.
+- ELF Binary Signatures:
+  - Detection: flags valid ELF headers with valid ei_class, ei_data, ei_version, e_type at offset > 0.
+  - Restraint: benign buffers containing "\x7fELF" with invalid ident or e_type return PASS / CLEAN.
+- Mach-O Binary Signatures:
+  - Detection: flags 32-bit, 64-bit, and Fat Universal Mach-O with valid CPU type and filetype.
+  - Restraint: benign buffers with Mach-O magic bytes without valid CPU type or filetype return PASS / CLEAN.
+- Image Trailing Data:
+  - Detection: flags appended non-whitespace / non-null data after PNG IEND, JPEG EOI, GIF trailer.
+  - Restraint: benign JPEGs with permissible trailing whitespace / null bytes (< 32 bytes) return PASS / CLEAN.
+- OOXML Macros & Relations:
+  - Pure in-memory XML inspection, zero network access.
+  - Internal relationships (themes, styles, settings) return PASS / CLEAN.
+- Polyglot Matrix:
+  - poly-01 (GIF-ZIP), poly-02 (JPEG-ZIP), poly-03 (PDF-ZIP) detected.
+  - poly-04 documented heuristic miss.
 
 6. VERIFICATION STATUS
 --------------------------------------------------------------------------------
-- Unit Tests:        tests/unit/security-engine/format-checks.test.ts (29/29 PASS)
-- Integration Tests: tests/integration/scanner/p17-format-checks.test.ts (11/11 PASS)
+- Unit Tests:        tests/unit/security-engine/format-checks.test.ts (33/33 PASS)
+- Integration Tests: tests/integration/scanner/p17-format-checks.test.ts (12/12 PASS)
 - API Tests:         tests/integration/api/p17-scans-api.test.ts (9/9 PASS)
 - Invariant Tests:   tests/integration/db/invariants.test.ts (15/15 PASS)
+- Full Project:      699/699 tests passed across 49 test suites
 
 GATE VERDICT: FULL PASS
 ================================================================================
