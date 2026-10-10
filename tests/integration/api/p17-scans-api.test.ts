@@ -244,4 +244,184 @@ describe('Integration — GET /api/v1/scans/:id Findings & Authorization Suite (
     expect(body.id).toBe(scanJobIdA);
     expect(body.status).toBe('SUCCEEDED');
   });
+
+  it('returns empty findings list (findings: []) when a scan job has no findings recorded', async () => {
+    const emptyScanJobId = crypto.randomUUID();
+    await adminPool.query(
+      `INSERT INTO scan_jobs (id, file_version_id, status, max_attempts)
+       VALUES ($1, (SELECT id FROM file_versions WHERE file_id = $2 LIMIT 1), 'QUEUED', 3)`,
+      [emptyScanJobId, fixturesA.fileId],
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/scans/${emptyScanJobId}`,
+      headers: {
+        authorization: `Bearer ${keyA.rawKey}`,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.id).toBe(emptyScanJobId);
+    expect(body.status).toBe('QUEUED');
+    expect(body.findings).toEqual([]);
+  });
+
+  it('sanitizes response and never exposes sensitive internal fields or leaked secrets', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/scans/${scanJobIdA}`,
+      headers: {
+        authorization: `Bearer ${keyA.rawKey}`,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    // Verify top-level allowed keys
+    const allowedTopKeys = new Set([
+      'id',
+      'status',
+      'fileVersionId',
+      'createdAt',
+      'finishedAt',
+      'findings',
+    ]);
+    for (const key of Object.keys(body)) {
+      expect(allowedTopKeys.has(key)).toBe(true);
+    }
+
+    // Verify finding allowed keys
+    const allowedFindingKeys = new Set([
+      'id',
+      'checkId',
+      'engine',
+      'engineVersion',
+      'signatureVersion',
+      'outcome',
+      'reasonCode',
+      'severity',
+      'confidence',
+      'evidence',
+      'scannedStorageVersionId',
+      'scannedSha256',
+      'scannedSize',
+      'durationMs',
+      'createdAt',
+    ]);
+
+    for (const finding of body.findings) {
+      for (const key of Object.keys(finding)) {
+        expect(allowedFindingKeys.has(key)).toBe(true);
+      }
+    }
+
+    // Explicit check against credential or secret leakage
+    const bodyStr = JSON.stringify(body);
+    expect(bodyStr).not.toContain('sug_dev_password');
+    expect(bodyStr).not.toContain('sug_admin');
+    expect(bodyStr).not.toContain('pepper');
+    expect(bodyStr).not.toContain('password_hash');
+  });
+
+  it('verifies database role permissions: sug_scanner can INSERT/SELECT but cannot UPDATE/DELETE, sug_api can SELECT but cannot INSERT/UPDATE/DELETE', async () => {
+    const scannerPool = createPool('sug_scanner', 'sug_scanner_dev_password');
+    const apiPool = createPool('sug_api', 'sug_api_dev_password');
+
+    try {
+      // 1. sug_scanner: SELECT scan_results succeeds
+      const scannerSelect = await scannerPool.query(
+        `SELECT id, check_id FROM scan_results WHERE scan_job_id = $1`,
+        [scanJobIdA],
+      );
+      expect(scannerSelect.rows.length).toBeGreaterThan(0);
+
+      // 2. sug_scanner: INSERT scan_results succeeds
+      const newJobId = crypto.randomUUID();
+      const testFileVersionId = crypto.randomUUID();
+      await adminPool.query(
+        `INSERT INTO file_versions (
+           id, file_id, version_no, provider, bucket, object_key,
+           storage_version_id, size_bytes, sha256_ingest
+         ) VALUES ($1, $2, (SELECT COALESCE(MAX(version_no), 0) + 1 FROM file_versions WHERE file_id = $2),
+                   'aws', 'sug-quarantine-local', $3, 'ver-perm', 100, decode('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'hex'))`,
+        [
+          testFileVersionId,
+          fixturesA.fileId,
+          `quarantine/${fixturesA.appId}/${crypto.randomUUID()}`,
+        ],
+      );
+
+      await adminPool.query(
+        `INSERT INTO scan_jobs (id, file_version_id, status, max_attempts)
+         VALUES ($1, $2, 'RUNNING', 3)`,
+        [newJobId, testFileVersionId],
+      );
+
+      const insertResult = await scannerPool.query(
+        `INSERT INTO scan_results (
+           scan_job_id, file_version_id, check_id, engine, engine_version,
+           outcome, reason_code, severity, confidence, evidence,
+           scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+         ) VALUES
+         ($1, $2, 'scanner.test_perm',
+          'test', '1.0.0', 'PASS', 'CLEAN', 'INFO', 'CONFIRMED', '{}'::jsonb,
+          'ver-1', decode('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'hex'), 100, 5)
+         RETURNING id`,
+        [newJobId, testFileVersionId],
+      );
+      expect(insertResult.rows.length).toBe(1);
+
+      // 3. sug_scanner: UPDATE scan_results must fail (permission denied or trigger)
+      await expect(
+        scannerPool.query(`UPDATE scan_results SET outcome = 'FAIL' WHERE scan_job_id = $1`, [
+          newJobId,
+        ]),
+      ).rejects.toThrow();
+
+      // 4. sug_scanner: DELETE scan_results must fail
+      await expect(
+        scannerPool.query(`DELETE FROM scan_results WHERE scan_job_id = $1`, [newJobId]),
+      ).rejects.toThrow();
+
+      // 5. sug_api: SELECT scan_results succeeds
+      const apiSelect = await apiPool.query(
+        `SELECT id, check_id FROM scan_results WHERE scan_job_id = $1`,
+        [scanJobIdA],
+      );
+      expect(apiSelect.rows.length).toBeGreaterThan(0);
+
+      // 6. sug_api: INSERT scan_results must fail (permission denied)
+      await expect(
+        apiPool.query(
+          `INSERT INTO scan_results (
+             scan_job_id, file_version_id, check_id, engine, engine_version,
+             outcome, reason_code, severity, confidence, evidence,
+             scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+           ) VALUES
+           ($1, (SELECT id FROM file_versions WHERE file_id = $2 LIMIT 1), 'scanner.api_insert_attempt',
+            'test', '1.0.0', 'PASS', 'CLEAN', 'INFO', 'CONFIRMED', '{}'::jsonb,
+            'ver-1', decode('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'hex'), 100, 5)`,
+          [newJobId, fixturesA.fileId],
+        ),
+      ).rejects.toThrow(/permission denied/i);
+
+      // 7. sug_api: UPDATE scan_results must fail
+      await expect(
+        apiPool.query(`UPDATE scan_results SET outcome = 'FAIL' WHERE scan_job_id = $1`, [
+          newJobId,
+        ]),
+      ).rejects.toThrow();
+
+      // 8. sug_api: DELETE scan_results must fail
+      await expect(
+        apiPool.query(`DELETE FROM scan_results WHERE scan_job_id = $1`, [newJobId]),
+      ).rejects.toThrow();
+    } finally {
+      await scannerPool.end();
+      await apiPool.end();
+    }
+  });
 });

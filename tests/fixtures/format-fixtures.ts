@@ -283,6 +283,22 @@ export function createEmbeddedElfBuffer(offset: number = 128): Buffer {
 }
 
 /**
+ * Creates a document buffer with an embedded Mach-O executable header at non-zero offset.
+ */
+export function createEmbeddedMachoBuffer(offset: number = 64): Buffer {
+  const buf = Buffer.alloc(offset + 128);
+  buf.fill(0x20);
+
+  // 64-bit LE Mach-O magic: 0xcf, 0xfa, 0xed, 0xfe
+  buf[offset] = 0xcf;
+  buf[offset + 1] = 0xfa;
+  buf[offset + 2] = 0xed;
+  buf[offset + 3] = 0xfe;
+
+  return buf;
+}
+
+/**
  * Creates a minimal valid ZIP archive buffer containing one text file.
  */
 export function createMinimalZipBuffer(

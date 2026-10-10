@@ -19,30 +19,62 @@ Monitored Active Content Keywords:
   - /OpenAction (Automatic payload execution on document open)
   - /RichMedia (Embedded flash or executable multimedia objects)
 
-2. NORMALIZATION PIPELINE
+2. NORMALIZATION PIPELINE & FAIL-CLOSED ARCHITECTURE
 --------------------------------------------------------------------------------
 1. Container CLI Normalization:
    - Command: qpdf --qdf --object-streams=disable <input.pdf> <normalized.pdf>
    - Uncompresses object streams and linearizes PDF structure into human-readable QDF.
-   - Pinned in scanner container Dockerfile: `apt-get install -y qpdf`.
-2. Safe In-Process Fallback:
-   - Memory-budgeted FlateDecode stream extraction via zlib.inflateSync / zlib.inflateRawSync.
-   - Per-stream expansion limit: 10 MB.
-   - Cumulative decompressed limit: 50 MB (guards against PDF Flate stream bombs).
+   - Verified inside the production scanner container:
+       $ docker build -t sug-scanner:test -f services/scanner/Dockerfile .
+       $ docker run --rm sug-scanner:test qpdf --version
+       qpdf version 11.3.0
+   - Execution Timeout: 15,000 ms.
+   - Max Buffer: 50 MB.
+
+2. Strict Fail-Closed Guarantees:
+   - Malformed PDF:
+     If qpdf fails with exit code 2 (malformed / damaged trailer), normalization immediately
+     aborts and returns:
+       outcome: 'ERROR'
+       reasonCode: 'PDF_MALFORMED'
+   - Timeout:
+     If qpdf hangs or exceeds timeout (15s):
+       outcome: 'ERROR'
+       reasonCode: 'PDF_NORMALIZATION_FAILED'
+       evidence: { timedOut: true, status: 'NORMALIZATION_FAILED' }
+   - Unexpected Crash / Execution Error:
+     If qpdf exits with non-zero code other than 0 or 3 (warnings):
+       outcome: 'ERROR'
+       reasonCode: 'PDF_NORMALIZATION_FAILED'
+   - Missing / Damaged End-of-File:
+     In fallback / stream mode, missing `%%EOF` marker returns:
+       outcome: 'ERROR'
+       reasonCode: 'PDF_MALFORMED'
+   - INVARIANT:
+     Errors during normalization NEVER fall through or become clean results.
+
+3. In-Process Stream Fallback:
+   - FlateDecode stream extraction via zlib.inflateSync / zlib.inflateRawSync.
+   - Per-stream expansion limit: 10 MB. Cumulative limit: 50 MB (guards against PDF Flate bombs).
    - Hex-encoded name normalization: resolves escapes such as:
      /#4a#61#76#61#53#63#72#69#70#74 -> /JavaScript
 
 3. TEST EXECUTION & EVIDENCE MATRIX (scan-04)
 --------------------------------------------------------------------------------
-Test Case                              Fixture Type          Engine        Outcome  Reason Code              Evidence Details
+Test Case                              Engine        Outcome  Reason Code               Evidence Details
 --------------------------------------------------------------------------------------------------------------------------------------
-Clean Benign PDF                       Synthetic PDF 1.4     pdf-scanner   PASS     CLEAN                    0 active keywords detected
-Raw /JavaScript Action                 Uncompressed stream   pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED  /JavaScript detected
-Process Invocation (/Launch)           /Launch calc.exe      pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED  /Launch, /OpenAction detected
-Hex-Escaped Scripting                  /#4a#61#76#61...      pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED  /JavaScript normalized & detected
-FlateDecode Compressed Stream          Deflated payload      pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED  /JavaScript in decompressed stream
-Corrupted / Missing %PDF- Header       Non-PDF binary        pdf-scanner   ERROR    PDF_MALFORMED            Missing %PDF- header
-Quarantine End-to-End Pipeline         S3 upload + Worker    pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED  ArtifactIdentity verified, scan_results persisted
+Clean Benign PDF (synthetic 1.4)       pdf-scanner   PASS     CLEAN                     0 active keywords detected
+Clean PDF with qpdf normalization      qpdf          PASS     CLEAN                     normalized: true, 0 active keywords
+Raw /JavaScript Action                 pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   /JavaScript detected
+Process Invocation (/Launch)           pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   /Launch, /OpenAction detected
+Hex-Escaped Scripting (/#4a#61...)     pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   /JavaScript normalized & detected
+FlateDecode Compressed Stream          pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   /JavaScript in decompressed stream
+Corrupted / Missing %PDF- Header       pdf-scanner   ERROR    PDF_MALFORMED             Missing %PDF- header
+Missing %%EOF Marker (Truncated PDF)   pdf-scanner   ERROR    PDF_MALFORMED             Missing %%EOF trailer
+QPDF Malformed (Exit Code 2)           qpdf          ERROR    PDF_MALFORMED             qpdf damaged PDF error
+QPDF Timeout Exceeded                  qpdf          ERROR    PDF_NORMALIZATION_FAILED  timedOut: true
+QPDF Fatal Crash (Exit Code 1)         qpdf          ERROR    PDF_NORMALIZATION_FAILED  qpdf process failure
+Quarantine End-to-End Pipeline         pdf-scanner   FAIL     ACTIVE_CONTENT_DETECTED   ArtifactIdentity verified, scan_results persisted
 
 4. ARTIFACT IDENTITY BINDING EVIDENCE
 --------------------------------------------------------------------------------
@@ -58,7 +90,7 @@ Result:
   reason_code:                ACTIVE_CONTENT_DETECTED
   severity:                   HIGH
   confidence:                 CONFIRMED
-  scanned_storage_version_id: <S3 Version ID>
+  scanned_storage_version_id: <S3 Storage Version ID>
   scanned_sha256:             <Matching 32-byte SHA-256 digest>
   scanned_size:               <Matching byte count>
 

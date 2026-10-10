@@ -30,6 +30,7 @@ import {
   createTrailingGifBuffer,
   createEmbeddedPeBuffer,
   createEmbeddedElfBuffer,
+  createEmbeddedMachoBuffer,
   createMinimalZipBuffer,
   createGifZipPolyglotBuffer,
   createJpegZipPolyglotBuffer,
@@ -93,6 +94,125 @@ describe('P17 Format Checks Unit Suite', () => {
 
       expect(result.outcome).toBe('ERROR');
       expect(result.reasonCode).toBe('PDF_MALFORMED');
+    });
+
+    it('returns ERROR and PDF_MALFORMED for truncated PDF missing %%EOF', async () => {
+      const truncated = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n');
+      const result = await inspectPdf({ buffer: truncated });
+
+      expect(result.outcome).toBe('ERROR');
+      expect(result.reasonCode).toBe('PDF_MALFORMED');
+      expect(result.evidence.error).toContain('Missing %%EOF');
+    });
+
+    it('runs through production qpdf normalization path for clean PDF', async () => {
+      const cleanPdf = createCleanPdfBuffer();
+      const mockScript = path.resolve(process.cwd(), 'tests/fixtures/qpdf-mock.mjs');
+
+      const originalMode = process.env.MOCK_QPDF_MODE;
+      process.env.MOCK_QPDF_MODE = 'success';
+      try {
+        const result = await inspectPdf({
+          buffer: cleanPdf,
+          qpdfPath: process.execPath,
+          qpdfArgs: [mockScript],
+        });
+
+        expect(result.outcome).toBe('PASS');
+        expect(result.reasonCode).toBe('CLEAN');
+        expect(result.engine).toBe('qpdf');
+        expect(result.evidence.normalizedWithQpdf).toBe(true);
+      } finally {
+        process.env.MOCK_QPDF_MODE = originalMode;
+      }
+    });
+
+    it('runs through production qpdf normalization path for active-content PDF', async () => {
+      const activePdf = createActiveContentPdfBuffer('javascript');
+      const mockScript = path.resolve(process.cwd(), 'tests/fixtures/qpdf-mock.mjs');
+
+      const originalMode = process.env.MOCK_QPDF_MODE;
+      process.env.MOCK_QPDF_MODE = 'success';
+      try {
+        const result = await inspectPdf({
+          buffer: activePdf,
+          qpdfPath: process.execPath,
+          qpdfArgs: [mockScript],
+        });
+
+        expect(result.outcome).toBe('FAIL');
+        expect(result.reasonCode).toBe('ACTIVE_CONTENT_DETECTED');
+        expect(result.engine).toBe('qpdf');
+        expect(result.detectedKeywords).toContain('/JavaScript');
+      } finally {
+        process.env.MOCK_QPDF_MODE = originalMode;
+      }
+    });
+
+    it('fails closed (ERROR / PDF_MALFORMED) when qpdf rejects malformed PDF', async () => {
+      const cleanPdf = createCleanPdfBuffer();
+      const mockScript = path.resolve(process.cwd(), 'tests/fixtures/qpdf-mock.mjs');
+
+      const originalMode = process.env.MOCK_QPDF_MODE;
+      process.env.MOCK_QPDF_MODE = 'malformed';
+      try {
+        const result = await inspectPdf({
+          buffer: cleanPdf,
+          qpdfPath: process.execPath,
+          qpdfArgs: [mockScript],
+        });
+
+        expect(result.outcome).toBe('ERROR');
+        expect(result.reasonCode).toBe('PDF_MALFORMED');
+        expect(result.engine).toBe('qpdf');
+        expect(result.outcome).not.toBe('PASS');
+      } finally {
+        process.env.MOCK_QPDF_MODE = originalMode;
+      }
+    });
+
+    it('fails closed (ERROR / PDF_NORMALIZATION_FAILED) when qpdf normalization times out', async () => {
+      const cleanPdf = createCleanPdfBuffer();
+      const mockScript = path.resolve(process.cwd(), 'tests/fixtures/qpdf-mock.mjs');
+
+      const originalMode = process.env.MOCK_QPDF_MODE;
+      process.env.MOCK_QPDF_MODE = 'timeout';
+      try {
+        const result = await inspectPdf({
+          buffer: cleanPdf,
+          qpdfPath: process.execPath,
+          qpdfArgs: [mockScript],
+          timeoutMs: 300,
+        });
+
+        expect(result.outcome).toBe('ERROR');
+        expect(result.reasonCode).toBe('PDF_NORMALIZATION_FAILED');
+        expect(result.evidence.timedOut).toBe(true);
+        expect(result.outcome).not.toBe('PASS');
+      } finally {
+        process.env.MOCK_QPDF_MODE = originalMode;
+      }
+    });
+
+    it('fails closed (ERROR / PDF_NORMALIZATION_FAILED) when qpdf process crashes or errors', async () => {
+      const cleanPdf = createCleanPdfBuffer();
+      const mockScript = path.resolve(process.cwd(), 'tests/fixtures/qpdf-mock.mjs');
+
+      const originalMode = process.env.MOCK_QPDF_MODE;
+      process.env.MOCK_QPDF_MODE = 'error';
+      try {
+        const result = await inspectPdf({
+          buffer: cleanPdf,
+          qpdfPath: process.execPath,
+          qpdfArgs: [mockScript],
+        });
+
+        expect(result.outcome).toBe('ERROR');
+        expect(result.reasonCode).toBe('PDF_NORMALIZATION_FAILED');
+        expect(result.outcome).not.toBe('PASS');
+      } finally {
+        process.env.MOCK_QPDF_MODE = originalMode;
+      }
     });
   });
 
@@ -249,6 +369,16 @@ describe('P17 Format Checks Unit Suite', () => {
       expect(result.reasonCode).toBe('EMBEDDED_EXECUTABLE_DETECTED');
       expect(result.severity).toBe('CRITICAL');
       expect(result.matches.some((m) => m.signatureType === 'ELF')).toBe(true);
+    });
+
+    it('detects embedded Mach-O header at non-zero offset', async () => {
+      const buffer = createEmbeddedMachoBuffer(64);
+      const result = await inspectEmbeddedSignatures({ buffer });
+
+      expect(result.outcome).toBe('FAIL');
+      expect(result.reasonCode).toBe('EMBEDDED_EXECUTABLE_DETECTED');
+      expect(result.severity).toBe('CRITICAL');
+      expect(result.matches.some((m) => m.signatureType === 'MACHO')).toBe(true);
     });
   });
 

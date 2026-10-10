@@ -7,8 +7,8 @@ CANONICAL SCHEMA, REASON CODES, IDEMPOTENCY & ARTIFACT IDENTITY BINDING
 --------------------------------------------------------------------------------
 Phase P17 finalizes the unified findings persistence model for all scanning engines.
 Every detector (ClamAV, YARA-X, Archive, PDF, OOXML Macro, OOXML Relationship,
-Image Trailing, Embedded Signatures, Polyglots) produces deterministic findings
-persisted into the immutable `scan_results` relation.
+Image Trailing, Embedded Signatures [PE, ELF, Mach-O], Polyglots) produces deterministic
+findings persisted into the immutable `scan_results` relation.
 
 CRITICAL INVARIANT:
 P17 is strictly an EVIDENCE and DETECTION phase.
@@ -44,21 +44,43 @@ CREATE TRIGGER scan_results_immutable
     FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
 
 IMMUTABILITY & IDEMPOTENCY:
-- Table is append-only; enforce by `forbid_mutation()` trigger.
-- Idempotency enforced via `UNIQUE (scan_job_id, check_id)`.
-- Concurrent or replayed scanning jobs utilize:
+- Table is append-only; enforced by PostgreSQL `forbid_mutation()` trigger:
+    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+  Attempts to UPDATE or DELETE throw an error, preventing evidence tampering.
+- Idempotency is enforced via `UNIQUE (scan_job_id, check_id)`.
+- Concurrent or replayed scanning jobs execute:
     INSERT INTO scan_results (...) VALUES (...)
     ON CONFLICT (scan_job_id, check_id) DO NOTHING;
 - Safe against re-scans while preserving cryptographic integrity of historical findings.
 
-3. ARTIFACT IDENTITY TUPLE BINDING (P12 Binding)
+3. ARTIFACT IDENTITY TUPLE BINDING & DATABASE INTEGRITY
 --------------------------------------------------------------------------------
 Every row in `scan_results` is cryptographically bound to the artifact scanned:
   (bucket, object_key, scanned_storage_version_id, scanned_sha256, scanned_size)
-Asserted Invariants:
-  1. finding.scanned_storage_version_id == file_versions.storage_version_id
-  2. finding.scanned_sha256 == file_versions.sha256_ingest
-  3. finding.scanned_size == file_versions.size_bytes
+
+Immutable Foreign-Key Relationship:
+  `scan_results.file_version_id` -> `file_versions.id`
+  `file_versions` stores the canonical ingest record:
+    - `bucket`: quarantine storage bucket (e.g., sug-quarantine-local)
+    - `object_key`: immutable storage object key
+    - `storage_version_id`: cloud object storage version ID
+    - `sha256_ingest`: 32-byte cryptographic hash of uploaded bytes
+    - `size_bytes`: byte length of uploaded artifact
+  Both `file_versions` and `scan_results` are protected by `forbid_mutation()` triggers.
+
+Identity Invariant Verification & Negative Testing:
+  1. Cryptographic Identity Mismatch Guard:
+     - Worker streams artifact from quarantine bucket while computing SHA-256 and size on the fly.
+     - If quarantine object SHA-256 != file_versions.sha256_ingest OR size != file_versions.size_bytes:
+       -> Scanner immediately halts, marks job DEAD with error detail 'IDENTITY_MISMATCH'.
+       -> Zero format checks or scanners are executed on untrusted / mismatched bytes.
+  2. Storage Overwrite Resistance:
+     - If the quarantine storage object is overwritten by an external process or subsequent upload,
+       the worker requests the exact `VersionId: storage_version_id`.
+     - Findings reflect the exact byte-level version ingested, completely isolated from subsequent mutations.
+  3. Worker Retries & Idempotency:
+     - Retrying an already scanned job executes `ON CONFLICT (scan_job_id, check_id) DO NOTHING`.
+     - Existing findings are preserved untouched and no stale or mutated findings can replace them.
 
 4. CANONICAL REASON CODE REGISTRY
 --------------------------------------------------------------------------------
@@ -97,11 +119,20 @@ scanner.image.trailing       IMAGE_TRAILING_DATA_DETECTED     FAIL       HIGH
 scanner.signature.embedded   EMBEDDED_EXECUTABLE_DETECTED     FAIL       CRITICAL
 scanner.polyglot             POLYGLOT_DETECTED                FAIL       CRITICAL
 
-5. VERIFICATION STATUS
+5. DETECTOR SUITE COVERAGE
 --------------------------------------------------------------------------------
-- Unit Tests:        tests/unit/security-engine/format-checks.test.ts (22/22 PASS)
-- Integration Tests: tests/integration/scanner/p17-format-checks.test.ts (7/7 PASS)
-- API Tests:         tests/integration/api/p17-scans-api.test.ts (6/6 PASS)
+- PE/MZ Executable Signatures:   Detected at non-zero offsets (\x4D\x5A).
+- ELF Binary Signatures:         Detected at non-zero offsets (\x7F\x45\x4C\x46).
+- Mach-O Binary Signatures:      Detected at non-zero offsets (\xCF\xFA\xED\xFE, \xCE\xFA\xED\xFE, \xFE\xED\xFA\xCF, \xFE\xED\xFA\xCE).
+- Benign text / doc without MZ:  PASS / CLEAN (no false positives).
+- OOXML Macros & Relations:      Pure in-memory XML inspection, zero network access.
+- Polyglot Matrix:               poly-01, poly-02, poly-03 detected; poly-04 documented miss.
+
+6. VERIFICATION STATUS
+--------------------------------------------------------------------------------
+- Unit Tests:        tests/unit/security-engine/format-checks.test.ts (29/29 PASS)
+- Integration Tests: tests/integration/scanner/p17-format-checks.test.ts (11/11 PASS)
+- API Tests:         tests/integration/api/p17-scans-api.test.ts (9/9 PASS)
 - Invariant Tests:   tests/integration/db/invariants.test.ts (15/15 PASS)
 
 GATE VERDICT: FULL PASS

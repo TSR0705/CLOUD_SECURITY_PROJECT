@@ -101,12 +101,26 @@ function extractAndDecompressStreams(buffer: Buffer): string[] {
   return decompressedStreams;
 }
 
+export interface QpdfNormalizeResult {
+  success: boolean;
+  warnings?: boolean;
+  malformed?: boolean;
+  timedOut?: boolean;
+  error?: string;
+  exitCode?: number | null;
+}
+
 /**
  * Checks whether qpdf CLI is available on the system.
  */
-async function isQpdfAvailable(): Promise<boolean> {
+async function isQpdfAvailable(options?: {
+  qpdfPath?: string | undefined;
+  qpdfArgs?: string[] | undefined;
+}): Promise<boolean> {
+  const binary = options?.qpdfPath ?? 'qpdf';
+  const extraArgs = options?.qpdfArgs ?? [];
   try {
-    await execFileAsync('qpdf', ['--version'], { timeout: 2000 });
+    await execFileAsync(binary, [...extraArgs, '--version'], { timeout: 2000 });
     return true;
   } catch {
     return false;
@@ -116,14 +130,61 @@ async function isQpdfAvailable(): Promise<boolean> {
 /**
  * Normalizes a PDF file using qpdf if available.
  */
-async function normalizeWithQpdf(inputPath: string, outputPath: string): Promise<boolean> {
+export async function normalizeWithQpdf(
+  inputPath: string,
+  outputPath: string,
+  options: {
+    qpdfPath?: string | undefined;
+    qpdfArgs?: string[] | undefined;
+    timeoutMs?: number | undefined;
+  } = {},
+): Promise<QpdfNormalizeResult> {
+  const binary = options.qpdfPath ?? 'qpdf';
+  const extraArgs = options.qpdfArgs ?? [];
+  const timeout = options.timeoutMs ?? 10000;
   try {
-    await execFileAsync('qpdf', ['--qdf', '--object-streams=disable', inputPath, outputPath], {
-      timeout: 10000,
-    });
-    return true;
-  } catch {
-    return false;
+    await execFileAsync(
+      binary,
+      [...extraArgs, '--qdf', '--object-streams=disable', inputPath, outputPath],
+      {
+        timeout,
+      },
+    );
+    return { success: true };
+  } catch (err: unknown) {
+    const error = err as {
+      code?: string | number;
+      killed?: boolean;
+      signal?: string;
+      status?: number;
+      stderr?: Buffer | string;
+      message?: string;
+    };
+    const isTimeout =
+      error.killed === true || error.signal === 'SIGTERM' || error.code === 'ETIMEDOUT';
+    if (isTimeout) {
+      return { success: false, timedOut: true, error: 'qpdf process timed out' };
+    }
+    const exitCode =
+      typeof error.status === 'number'
+        ? error.status
+        : typeof error.code === 'number'
+          ? error.code
+          : null;
+    if (exitCode === 3) {
+      // Exit code 3 = warnings, but output file was produced
+      if (fs.existsSync(outputPath)) {
+        return { success: true, warnings: true };
+      }
+    }
+    const stderrStr = error.stderr ? error.stderr.toString() : (error.message ?? '');
+    const isMalformed = exitCode === 2 || /damaged|corrupt|invalid|unable to find/i.test(stderrStr);
+    return {
+      success: false,
+      malformed: isMalformed,
+      exitCode,
+      error: stderrStr || error.message || 'qpdf execution failed',
+    };
   }
 }
 
@@ -160,6 +221,9 @@ function scanTextForKeywords(text: string): {
 export interface InspectPdfOptions {
   filePath?: string;
   buffer?: Buffer;
+  qpdfPath?: string;
+  qpdfArgs?: string[];
+  timeoutMs?: number;
 }
 
 /**
@@ -205,22 +269,100 @@ export async function inspectPdf(options: InspectPdfOptions): Promise<PdfCheckRe
       };
     }
 
+    const tailSlice = buffer.subarray(Math.max(0, buffer.length - 2048)).toString('binary');
+    const hasEof = tailSlice.includes('%%EOF') || buffer.toString('binary').includes('%%EOF');
+
     let normalizedWithQpdf = false;
     let fullTextToScan = buffer.toString('binary');
 
     // Attempt normalization with qpdf if executable is available
-    if (filePath && (await isQpdfAvailable())) {
+    if (
+      filePath &&
+      (await isQpdfAvailable({ qpdfPath: options.qpdfPath, qpdfArgs: options.qpdfArgs }))
+    ) {
       const qpdfTempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sug-qpdf-'));
       const qpdfOutput = path.join(qpdfTempDir, 'normalized.pdf');
       try {
-        const success = await normalizeWithQpdf(filePath, qpdfOutput);
-        if (success && fs.existsSync(qpdfOutput)) {
+        const qpdfRes = await normalizeWithQpdf(filePath, qpdfOutput, {
+          qpdfPath: options.qpdfPath,
+          qpdfArgs: options.qpdfArgs,
+          timeoutMs: options.timeoutMs,
+        });
+
+        if (qpdfRes.success && fs.existsSync(qpdfOutput)) {
           const normalizedBuf = await fs.promises.readFile(qpdfOutput);
           fullTextToScan += '\n' + normalizedBuf.toString('binary');
           normalizedWithQpdf = true;
+        } else {
+          // qpdf failed: fail closed! Errors NEVER become clean results!
+          const durationMs = Date.now() - startTime;
+          if (qpdfRes.timedOut) {
+            return {
+              checkId: 'scanner.pdf',
+              engine: 'qpdf',
+              outcome: 'ERROR',
+              reasonCode: 'PDF_NORMALIZATION_FAILED',
+              severity: 'HIGH',
+              confidence: 'CONFIRMED',
+              detectedKeywords: [],
+              evidence: {
+                error: 'qpdf normalization timed out',
+                timedOut: true,
+              },
+              durationMs,
+            };
+          }
+          if (qpdfRes.malformed) {
+            return {
+              checkId: 'scanner.pdf',
+              engine: 'qpdf',
+              outcome: 'ERROR',
+              reasonCode: 'PDF_MALFORMED',
+              severity: 'HIGH',
+              confidence: 'CONFIRMED',
+              detectedKeywords: [],
+              evidence: {
+                error: qpdfRes.error || 'qpdf rejected malformed PDF',
+                exitCode: qpdfRes.exitCode,
+              },
+              durationMs,
+            };
+          }
+          return {
+            checkId: 'scanner.pdf',
+            engine: 'qpdf',
+            outcome: 'ERROR',
+            reasonCode: 'PDF_NORMALIZATION_FAILED',
+            severity: 'HIGH',
+            confidence: 'CONFIRMED',
+            detectedKeywords: [],
+            evidence: {
+              error: qpdfRes.error || 'qpdf normalization failed',
+              exitCode: qpdfRes.exitCode,
+            },
+            durationMs,
+          };
         }
       } finally {
         await fs.promises.rm(qpdfTempDir, { recursive: true, force: true }).catch(() => {});
+      }
+    } else {
+      // In-process fallback: enforce EOF validation
+      if (!hasEof) {
+        const durationMs = Date.now() - startTime;
+        return {
+          checkId: 'scanner.pdf',
+          engine: 'pdf-scanner',
+          outcome: 'ERROR',
+          reasonCode: 'PDF_MALFORMED',
+          severity: 'HIGH',
+          confidence: 'CONFIRMED',
+          detectedKeywords: [],
+          evidence: {
+            error: 'Missing %%EOF termination marker in PDF',
+          },
+          durationMs,
+        };
       }
     }
 

@@ -7,7 +7,7 @@ GET /api/v1/scans/:id SPECIFICATION, AUTHORIZATION & BOUNDARY VERIFICATION
 --------------------------------------------------------------------------------
 Path:        GET /api/v1/scans/:id
 Description: Retrieves scan job execution status and deterministic security findings.
-Auth:        Bearer <sug_api_key> (P6) OR Bearer <user_jwt> (P7)
+Auth:        Bearer <sug_api_key> (P6 API Key) OR Bearer <user_jwt> (P7 Dashboard JWT)
 OpenAPI:     Generated and validated in docs/openapi.json under "Scans" tag.
 
 2. SECURITY & AUTHORIZATION INVARIANTS
@@ -24,9 +24,16 @@ OpenAPI:     Generated and validated in docs/openapi.json under "Scans" tag.
      the caller's `application_id`.
    - Access attempts across tenant applications return HTTP 403 Forbidden with
      `urn:sug:error:forbidden`.
-5. Deterministic Finding Order:
+5. Empty Findings Handling:
+   - If a scan job is queued, running, or has no findings recorded yet, the endpoint
+     returns HTTP 200 OK with `findings: []`.
+6. Deterministic Finding Order:
    - All findings returned in the `findings` array are deterministically sorted
      by `check_id ASC`.
+7. Safe Response Fields & Secret Sanitization:
+   - Serialized strictly against Fastify OpenAPI response schema.
+   - Any sensitive internal database columns, pepper, passwords, raw hashes, or
+     file paths are stripped and never leaked in API responses.
 
 3. RESPONSE PAYLOAD SCHEMA (HTTP 200 OK)
 --------------------------------------------------------------------------------
@@ -91,15 +98,30 @@ OpenAPI:     Generated and validated in docs/openapi.json under "Scans" tag.
   ]
 }
 
-4. TEST EXECUTION SUMMARY
+4. DATABASE LEAST-PRIVILEGE ROLE ENFORCEMENT
 --------------------------------------------------------------------------------
-Suite: tests/integration/api/p17-scans-api.test.ts (6/6 PASS)
+Role `sug_scanner`:
+  - Granted: SELECT, INSERT on `scan_results`; SELECT, UPDATE on `scan_jobs`; SELECT on `file_versions`.
+  - Prohibited: UPDATE and DELETE on `scan_results` (enforced via trigger and role grants).
+  - Verified: scanner inserts findings successfully and queries existing findings for idempotency.
+Role `sug_api`:
+  - Granted: SELECT on `scan_results`, `scan_jobs`, `file_versions`.
+  - Prohibited: INSERT, UPDATE, and DELETE on `scan_results`.
+  - Verified: API queries findings for tenant-scoped responses; direct INSERT attempts fail with
+    PostgreSQL error: permission denied for table scan_results.
+
+5. TEST EXECUTION SUMMARY
+--------------------------------------------------------------------------------
+Suite: tests/integration/api/p17-scans-api.test.ts (9/9 PASS)
   - rejects unauthenticated requests with 401 Problem Details:               PASS
   - rejects invalid UUID format with 400 Problem Details:                    PASS
   - returns 404 Problem Details when scan job does not exist:                PASS
   - enforces tenant application boundary (returns 403 when App B accesses A):PASS
   - returns scan status and deterministically sorted findings for API key:   PASS
   - allows access to scan job for authorized Dashboard User JWT:             PASS
+  - returns empty findings list (findings: []) when scan job has no findings:PASS
+  - sanitizes response and never exposes sensitive internal fields or leaks: PASS
+  - verifies database role permissions (sug_scanner vs sug_api):            PASS
 
 GATE VERDICT: FULL PASS
 ================================================================================

@@ -32,6 +32,7 @@ import {
   createActiveContentPdfBuffer,
   createTrailingPngBuffer,
   createEmbeddedPeBuffer,
+  createEmbeddedMachoBuffer,
   createMinimalZipBuffer,
   createGifZipPolyglotBuffer,
   createJpegZipPolyglotBuffer,
@@ -516,5 +517,253 @@ describe('Phase P17: Format Checks & Findings Persistence DoD Suite', () => {
       [jobId],
     );
     expect(countRes.rows[0].count).toBe(1);
+  });
+
+  it('detects embedded Mach-O executable header at non-zero offset', async () => {
+    const machoBuffer = createEmbeddedMachoBuffer(64);
+    const obj = await putTestObject(machoBuffer, 'document.bin');
+    const { jobId } = await createScanJobFixture({
+      objectKey: obj.key,
+      storageVersionId: obj.versionId,
+      sizeBytes: obj.size,
+      sha256Ingest: obj.sha256,
+    });
+
+    const worker = new ScannerWorker({
+      db: scannerPool,
+      storageProvider,
+      enableClamAv: false,
+      enableYara: false,
+      enableArchive: false,
+      enableFormatChecks: true,
+      tempDir: testTmpDir,
+    });
+
+    const { job, result } = await worker.runOnce();
+    expect(job?.id).toBe(jobId);
+    expect(result?.success).toBe(true);
+    expect(result?.embeddedSig?.outcome).toBe('FAIL');
+    expect(result?.embeddedSig?.reasonCode).toBe('EMBEDDED_EXECUTABLE_DETECTED');
+
+    const dbRes = await scannerPool.query(
+      `SELECT check_id, outcome, reason_code, severity, confidence,
+              scanned_storage_version_id, scanned_sha256, scanned_size, evidence
+       FROM scan_results
+       WHERE scan_job_id = $1 AND check_id = 'scanner.signature.embedded'`,
+      [jobId],
+    );
+    expect(dbRes.rows).toHaveLength(1);
+    const row = dbRes.rows[0]!;
+    expect(row.outcome).toBe('FAIL');
+    expect(row.reason_code).toBe('EMBEDDED_EXECUTABLE_DETECTED');
+    expect(row.severity).toBe('CRITICAL');
+    expect(row.scanned_storage_version_id).toBe(obj.versionId);
+    expect(row.scanned_sha256.toString('hex')).toBe(obj.sha256);
+    expect(Number(row.scanned_size)).toBe(obj.size);
+    const evidence = row.evidence as { matches: Array<{ signatureType: string }> };
+    expect(evidence.matches.some((m) => m.signatureType === 'MACHO')).toBe(true);
+  });
+
+  it('fails closed and marks job DEAD on cryptographic identity mismatch without invoking format checkers', async () => {
+    const realBuffer = createCleanPdfBuffer();
+    const obj = await putTestObject(realBuffer, 'tampered.pdf');
+
+    // Supply a deliberately mismatched digest (tampered ingest record)
+    const tamperedSha = crypto.createHash('sha256').update('FORGED_CONTENT_BYTES').digest('hex');
+
+    const { jobId } = await createScanJobFixture({
+      objectKey: obj.key,
+      storageVersionId: obj.versionId,
+      sizeBytes: obj.size,
+      sha256Ingest: tamperedSha,
+    });
+
+    const worker = new ScannerWorker({
+      db: scannerPool,
+      storageProvider,
+      enableClamAv: false,
+      enableYara: false,
+      enableArchive: false,
+      enableFormatChecks: true,
+      tempDir: testTmpDir,
+    });
+
+    const { job, result } = await worker.runOnce();
+    expect(job?.id).toBe(jobId);
+    expect(result?.success).toBe(false);
+    expect(result?.verified).toBe(false);
+
+    // Scan job must have transitioned to DEAD
+    const jobRes = await adminPool.query(
+      `SELECT status, attempts, last_error FROM scan_jobs WHERE id = $1`,
+      [jobId],
+    );
+    expect(jobRes.rows[0].status).toBe('DEAD');
+    expect(jobRes.rows[0].last_error).toContain('Cryptographic identity mismatch');
+
+    // Finding recorded must be IDENTITY_MISMATCH, format checks must NOT have been executed
+    const findingsRes = await scannerPool.query(
+      `SELECT check_id, outcome, reason_code FROM scan_results WHERE scan_job_id = $1`,
+      [jobId],
+    );
+    expect(findingsRes.rows).toHaveLength(1);
+    expect(findingsRes.rows[0].check_id).toBe('scanner.skeleton');
+    expect(findingsRes.rows[0].outcome).toBe('FAIL');
+    expect(findingsRes.rows[0].reason_code).toBe('IDENTITY_MISMATCH');
+  });
+
+  it('binds exact storage_version_id and resists stale findings on storage overwrite and worker retries', async () => {
+    const sharedKey = `quarantine/${fixtures.appId}/${crypto.randomUUID()}/versioned-file.pdf`;
+
+    // 1. Put Version 1 in S3
+    const v1Pdf = createCleanPdfBuffer();
+    const putV1 = await rawS3.send(
+      new PutObjectCommand({
+        Bucket: S3_QUARANTINE_BUCKET,
+        Key: sharedKey,
+        Body: v1Pdf,
+      }),
+    );
+    const ver1Id = putV1.VersionId!;
+    const sha1 = crypto.createHash('sha256').update(v1Pdf).digest('hex').toLowerCase();
+
+    // 2. Overwrite on same S3 key with Version 2
+    const v2Pdf = createActiveContentPdfBuffer('javascript');
+    const putV2 = await rawS3.send(
+      new PutObjectCommand({
+        Bucket: S3_QUARANTINE_BUCKET,
+        Key: sharedKey,
+        Body: v2Pdf,
+      }),
+    );
+    const ver2Id = putV2.VersionId!;
+    expect(ver1Id).not.toBe(ver2Id);
+
+    // 3. Scan job is explicitly bound to Version 1
+    const { jobId } = await createScanJobFixture({
+      objectKey: sharedKey,
+      storageVersionId: ver1Id,
+      sizeBytes: v1Pdf.length,
+      sha256Ingest: sha1,
+    });
+
+    const worker = new ScannerWorker({
+      db: scannerPool,
+      storageProvider,
+      enableClamAv: false,
+      enableYara: false,
+      enableArchive: false,
+      enableFormatChecks: true,
+      tempDir: testTmpDir,
+    });
+
+    const run1 = await worker.runOnce();
+    expect(run1.result?.success).toBe(true);
+    expect(run1.result?.verified).toBe(true);
+    expect(run1.result?.sha256).toBe(sha1);
+    expect(run1.result?.pdf?.outcome).toBe('PASS');
+
+    // Verify findings explicitly record Version 1
+    const results1 = await scannerPool.query(
+      `SELECT check_id, scanned_storage_version_id, scanned_sha256, outcome, reason_code
+       FROM scan_results WHERE scan_job_id = $1`,
+      [jobId],
+    );
+    expect(results1.rows.length).toBeGreaterThan(0);
+    for (const r of results1.rows) {
+      expect(r.scanned_storage_version_id).toBe(ver1Id);
+      expect(r.scanned_sha256.toString('hex')).toBe(sha1);
+    }
+
+    // 4. Retry simulation: re-recording finding with different data does not mutate immutable findings
+    await expect(
+      worker.recordFinding({
+        jobId,
+        fileVersionId: run1.job!.fileVersionId,
+        checkId: 'scanner.pdf',
+        engine: 'tampered-scanner',
+        outcome: 'FAIL',
+        reasonCode: 'ACTIVE_CONTENT_DETECTED',
+        severity: 'HIGH',
+        confidence: 'CONFIRMED',
+        evidence: { tampered: true },
+        storageVersionId: ver2Id, // Attempt to record V2 over existing V1 finding
+        sha256Hex: '0000000000000000000000000000000000000000000000000000000000000000',
+        sizeBytes: 9999,
+        durationMs: 1,
+      }),
+    ).resolves.not.toThrow(); // ON CONFLICT DO NOTHING ignores stale update
+
+    const results2 = await scannerPool.query(
+      `SELECT check_id, scanned_storage_version_id, outcome, reason_code
+       FROM scan_results WHERE scan_job_id = $1 AND check_id = 'scanner.pdf'`,
+      [jobId],
+    );
+    expect(results2.rows).toHaveLength(1);
+    expect(results2.rows[0].scanned_storage_version_id).toBe(ver1Id);
+    expect(results2.rows[0].outcome).toBe('PASS');
+    expect(results2.rows[0].reason_code).toBe('CLEAN');
+  });
+
+  it('proves immutable foreign-key relationship and forbid_mutation trigger on file_versions and scan_results', async () => {
+    const cleanPdf = createCleanPdfBuffer();
+    const obj = await putTestObject(cleanPdf, 'immutable.pdf');
+    const { jobId, fileVersionId } = await createScanJobFixture({
+      objectKey: obj.key,
+      storageVersionId: obj.versionId,
+      sizeBytes: obj.size,
+      sha256Ingest: obj.sha256,
+    });
+
+    const worker = new ScannerWorker({
+      db: scannerPool,
+      storageProvider,
+      enableClamAv: false,
+      enableYara: false,
+      enableArchive: false,
+      enableFormatChecks: true,
+      tempDir: testTmpDir,
+    });
+
+    await worker.runOnce();
+
+    // 1. Foreign-key relationship: scan_results.file_version_id -> file_versions.id
+    const joinedRes = await adminPool.query(
+      `SELECT sr.id as finding_id, sr.check_id, sr.scanned_storage_version_id,
+              fv.id as version_id, fv.bucket, fv.object_key, fv.storage_version_id,
+              fv.size_bytes, fv.sha256_ingest
+       FROM scan_results sr
+       JOIN file_versions fv ON sr.file_version_id = fv.id
+       WHERE sr.scan_job_id = $1`,
+      [jobId],
+    );
+
+    expect(joinedRes.rows.length).toBeGreaterThan(0);
+    const firstRow = joinedRes.rows[0]!;
+    expect(firstRow.version_id).toBe(fileVersionId);
+    expect(firstRow.bucket).toBe(S3_QUARANTINE_BUCKET);
+    expect(firstRow.object_key).toBe(obj.key);
+    expect(firstRow.scanned_storage_version_id).toBe(obj.versionId);
+    expect(firstRow.storage_version_id).toBe(obj.versionId);
+    expect(firstRow.sha256_ingest.toString('hex')).toBe(obj.sha256);
+    expect(Number(firstRow.size_bytes)).toBe(obj.size);
+
+    // 2. Verify file_versions is append-only: UPDATE or DELETE must fail closed
+    await expect(
+      adminPool.query(`UPDATE file_versions SET size_bytes = 9999 WHERE id = $1`, [fileVersionId]),
+    ).rejects.toThrow(/append-only/i);
+
+    await expect(
+      adminPool.query(`DELETE FROM file_versions WHERE id = $1`, [fileVersionId]),
+    ).rejects.toThrow(/append-only/i);
+
+    // 3. Verify scan_results is append-only: UPDATE or DELETE must fail closed
+    await expect(
+      adminPool.query(`UPDATE scan_results SET outcome = 'FAIL' WHERE scan_job_id = $1`, [jobId]),
+    ).rejects.toThrow(/append-only/i);
+
+    await expect(
+      adminPool.query(`DELETE FROM scan_results WHERE scan_job_id = $1`, [jobId]),
+    ).rejects.toThrow(/append-only/i);
   });
 });

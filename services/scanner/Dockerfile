@@ -32,7 +32,7 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@12.5.1 --activate
 
 # Copy monorepo configuration and lockfile
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/storage/package.json ./packages/storage/
 COPY packages/security-engine/package.json ./packages/security-engine/
@@ -42,7 +42,7 @@ COPY services/scanner/package.json ./services/scanner/
 # Install workspace dependencies
 RUN pnpm install --frozen-lockfile
 
-# Copy source trees, scripts, and rules
+# Copy source trees, scripts, and rules (cache bust P17)
 COPY scripts/ ./scripts/
 COPY packages/shared/ ./packages/shared/
 COPY packages/storage/ ./packages/storage/
@@ -50,12 +50,8 @@ COPY packages/security-engine/ ./packages/security-engine/
 COPY packages/scanner/ ./packages/scanner/
 COPY services/scanner/ ./services/scanner/
 
-# Build TypeScript packages
-RUN pnpm --filter @sug/shared build \
-    && pnpm --filter @sug/storage build \
-    && pnpm --filter @sug/security-engine build \
-    && pnpm --filter @sug/scanner build \
-    && pnpm --filter @sug/service-scanner build
+# Build TypeScript packages via project references
+RUN pnpm exec tsc -b services/scanner/tsconfig.json
 
 # Validate rules at container build time
 RUN node scripts/validate-yara-rules.mjs packages/scanner/rules
