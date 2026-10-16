@@ -24,12 +24,12 @@ export type {
 
 export type DecisionRule =
   | 'R1' // Result Identity Verification
-  | 'R2' // Required Check Completeness & Scanner Failures
-  | 'R3' // Critical Finding Check (Malware / Exploit / Bomb)
-  | 'R4' // Detector Disagreement / Type Undetermined
-  | 'R5' // Archive Integrity & Structural Violations
-  | 'R6' // Risk Score Threshold
-  | 'R7' // Clean Verification
+  | 'R2' // Required Checks and Scanner Errors
+  | 'R3' // High- and Critical-Severity Failures
+  | 'R4' // Medium-Severity and Suspicious Findings
+  | 'R5' // Required Content Disarm and Reconstruction (CDR)
+  | 'R6' // Manual-Review Risk Threshold
+  | 'R7' // Default Allow
   | 'HUMAN_REVIEW';
 
 export const DECISION_RECORD_SCHEMA = 'sug.decision/v1' as const;
@@ -44,6 +44,7 @@ export interface DecisionPolicyInput {
   readonly cdrRequired?: boolean | undefined;
   readonly onSuspicious?: 'QUARANTINE' | 'BLOCK' | undefined;
   readonly manualReviewThreshold?: number | undefined;
+  readonly manualReview?: number | undefined;
   readonly archiveAllowed?: boolean | undefined;
   readonly riskThreshold?: number | undefined;
   readonly disagreementAction?: 'QUARANTINE' | 'BLOCK' | 'FLAG' | undefined;

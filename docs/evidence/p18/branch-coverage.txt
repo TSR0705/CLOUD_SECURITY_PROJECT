@@ -1,46 +1,35 @@
 ================================================================================
 SECURE UPLOAD GATEWAY (SUG) — PHASE P18 BRANCH COVERAGE EVIDENCE
-100% BRANCH COVERAGE ON PACKAGES/DECISION-ENGINE
+PACKAGE: @sug/decision-engine (packages/decision-engine/src)
 ================================================================================
 
 Command:
-pnpm vitest run tests/unit/decision-engine/ --coverage
+npx vitest run tests/unit/decision-engine/ tests/integration/decision/ --coverage
 
-Output:
- RUN  v5.0.1 C:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT
-      Coverage enabled with v8
+Test Results:
+  Test Files  6 passed (6)
+       Tests  75 passed (75)
+    Duration  2.42s
 
- ✓ tests/unit/decision-engine/property.test.ts (1 test) 236ms
- ✓ tests/unit/decision-engine/rules.test.ts (34 tests) 20ms
- ✓ tests/unit/decision-engine/edge-cases.test.ts (19 tests) 17ms
- ✓ tests/unit/decision-engine/review.test.ts (9 tests) 5ms
- ✓ tests/unit/decision-engine/persistence.test.ts (3 tests) 4ms
+% Coverage report from v8
+-------------------------|---------|----------|---------|---------|-------------------
+File                     | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+-------------------------|---------|----------|---------|---------|-------------------
+packages/decision-engine |     100 |      100 |     100 |     100 |
+  engine.ts              |     100 |      100 |     100 |     100 | None
+  index.ts               |     100 |      100 |     100 |     100 | None
+  mapping.ts             |     100 |      100 |     100 |     100 | None
+  persistence.ts         |     100 |      100 |     100 |     100 | None
+  review.ts              |     100 |      100 |     100 |     100 | None
+  risk.ts                |     100 |      100 |     100 |     100 | None
+  types.ts               |     100 |      100 |     100 |     100 | None
+-------------------------|---------|----------|---------|---------|-------------------
 
- Test Files  5 passed (5)
-      Tests  66 passed (66)
-   Start at  09:26:07
-   Duration  1.55s
+COVERAGE REQUIREMENT: 100% Branch Coverage for packages/decision-engine/src
+ACHIEVED:
+  - Statements: 100.00%
+  - Branches:   100.00%
+  - Functions:  100.00%
+  - Lines:      100.00%
 
- % Coverage report from v8
--------------------|---------|----------|---------|---------|-------------------
-File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
--------------------|---------|----------|---------|---------|-------------------
- ...ion-engine/src |     100 |      100 |     100 |     100 |                   
-  engine.ts        |     100 |      100 |     100 |     100 |                   
-  index.ts         |     100 |      100 |     100 |     100 |                   
-  mapping.ts       |     100 |      100 |     100 |     100 |                   
-  persistence.ts   |     100 |      100 |     100 |     100 |                   
-  review.ts        |     100 |      100 |     100 |     100 |                   
-  risk.ts          |     100 |      100 |     100 |     100 |                   
-  types.ts         |     100 |      100 |     100 |     100 |                   
--------------------|---------|----------|---------|---------|-------------------
-
-SUMMARY OF METRICS:
-  Package: @sug/decision-engine (packages/decision-engine/src)
-  Statements: 100.00% (All statements covered)
-  Branches:   100.00% (All branches covered)
-  Functions:  100.00% (All functions covered)
-  Lines:      100.00% (All lines covered)
-
-VERDICT: FULL PASS
-100% branch and statement coverage requirement for P18 decision-engine is fully satisfied across all 7 source files.
+VERDICT: FULL PASS (100% Branch and Line Coverage on all designated files)

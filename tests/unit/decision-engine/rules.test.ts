@@ -486,7 +486,7 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
     });
   });
 
-  describe('Rule R5 — Archive Integrity & Bomb Checks', () => {
+  describe('Rule R3 — Threat Detection (Malware, Exploits, Archive Bombs & Structural Failures)', () => {
     it('blocks on ARCHIVE_BOMB_DETECTED (HIGH/CRITICAL severity)', () => {
       const archivePolicy: DecisionPolicyInput = {
         ...defaultPolicy,
@@ -510,7 +510,7 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
       const res = decide(archivePolicy, validIdentity, [...cleanFindings, bombFinding]);
       expect(res.decision).toBe('BLOCK');
       expect(res.primaryReason).toBe('ARCHIVE_BOMB_DETECTED');
-      expect(res.rule).toBe('R5');
+      expect(res.rule).toBe('R3');
       expect(res.integrityResult).toBe('FAIL');
     });
 
@@ -532,131 +532,73 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
       const res = decide(defaultPolicy, validIdentity, [...cleanFindings, zipSlipFinding]);
       expect(res.decision).toBe('BLOCK');
       expect(res.primaryReason).toBe('ZIP_SLIP_DETECTED');
-      expect(res.rule).toBe('R5');
+      expect(res.rule).toBe('R3');
+      expect(res.integrityResult).toBe('FAIL');
     });
   });
 
-  describe('Rule R6 — Risk Score Threshold', () => {
-    it('blocks when cumulative risk score reaches or exceeds policy.riskThreshold', () => {
-      // 2 medium findings: 25 + 25 = 50 >= threshold (50)
-      const medFinding1: FindingInput = {
-        checkId: 'scanner.heuristic.1',
-        engine: 'heuristics',
-        engineVersion: '1.0.0',
-        signatureVersion: null,
-        outcome: 'WARN',
-        reasonCode: 'SUSPICIOUS_HEURISTIC_1',
+  describe('Rule R4 — Medium-Severity and Suspicious Findings', () => {
+    it('quarantines on medium severity FAIL finding under default onSuspicious (e.g. OOXML external relationship)', () => {
+      const relFinding: FindingInput = {
+        checkId: 'scanner.ooxml.relationship',
+        engine: 'ooxml',
+        outcome: 'FAIL',
+        reasonCode: 'OOXML_EXTERNAL_RELATIONSHIP',
         severity: 'MEDIUM',
-        confidence: 'HIGH',
+        confidence: 'CONFIRMED',
         scannedStorageVersionId: 'v-1001',
         scannedSha256: dummySha,
         scannedSizeBytes: 1024,
       };
 
-      const medFinding2: FindingInput = {
-        checkId: 'scanner.heuristic.2',
-        engine: 'heuristics',
-        engineVersion: '1.0.0',
-        signatureVersion: null,
-        outcome: 'WARN',
-        reasonCode: 'SUSPICIOUS_HEURISTIC_2',
-        severity: 'MEDIUM',
-        confidence: 'HIGH',
-        scannedStorageVersionId: 'v-1001',
-        scannedSha256: dummySha,
-        scannedSizeBytes: 1024,
-      };
-
-      const res = decide(defaultPolicy, validIdentity, [
-        ...cleanFindings,
-        medFinding1,
-        medFinding2,
-      ]);
-      expect(res.decision).toBe('BLOCK');
-      expect(res.rule).toBe('R6');
-      expect(res.riskScore).toBe(50);
-      expect(res.primaryReason).toBe('SUSPICIOUS_HEURISTIC_1');
-    });
-
-    it('quarantines when risk score meets manualReviewThreshold (default onSuspicious QUARANTINE)', () => {
-      const quarantinePolicy: DecisionPolicyInput = {
-        ...defaultPolicy,
-        riskThreshold: 80,
-        manualReviewThreshold: 25,
-      };
-
-      const medFinding: FindingInput = {
-        checkId: 'scanner.heuristic.1',
-        engine: 'heuristics',
-        engineVersion: '1.0.0',
-        signatureVersion: null,
-        outcome: 'WARN',
-        reasonCode: 'SUSPICIOUS_HEURISTIC_1',
-        severity: 'MEDIUM', // weight 25
-        confidence: 'HIGH',
-        scannedStorageVersionId: 'v-1001',
-        scannedSha256: dummySha,
-        scannedSizeBytes: 1024,
-      };
-
-      const res = decide(quarantinePolicy, validIdentity, [...cleanFindings, medFinding]);
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, relFinding]);
       expect(res.decision).toBe('QUARANTINE');
-      expect(res.rule).toBe('R6');
-      expect(res.riskScore).toBe(25);
+      expect(res.rule).toBe('R4');
+      expect(res.primaryReason).toBe('OOXML_EXTERNAL_RELATIONSHIP');
     });
 
-    it('blocks when risk score meets manualReviewThreshold and policy.onSuspicious === "BLOCK"', () => {
-      const blockSuspiciousPolicy: DecisionPolicyInput = {
+    it('quarantines on medium severity archive finding (e.g. DUPLICATE_ENTRY_NAMES) and sets integrityResult to FAIL', () => {
+      const dupFinding: FindingInput = {
+        checkId: 'scanner.archive.integrity',
+        engine: 'security-engine-archive',
+        outcome: 'FAIL',
+        reasonCode: 'DUPLICATE_ENTRY_NAMES',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, dupFinding]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R4');
+      expect(res.primaryReason).toBe('DUPLICATE_ENTRY_NAMES');
+      expect(res.integrityResult).toBe('FAIL');
+    });
+
+    it('blocks on medium severity FAIL finding when policy.onSuspicious === "BLOCK"', () => {
+      const blockPolicy: DecisionPolicyInput = {
         ...defaultPolicy,
-        riskThreshold: 80,
-        manualReviewThreshold: 25,
         onSuspicious: 'BLOCK',
       };
 
-      const medFinding: FindingInput = {
-        checkId: 'scanner.heuristic.1',
-        engine: 'heuristics',
-        engineVersion: '1.0.0',
-        signatureVersion: null,
-        outcome: 'WARN',
-        reasonCode: 'SUSPICIOUS_HEURISTIC_1',
-        severity: 'MEDIUM', // weight 25
-        confidence: 'HIGH',
+      const relFinding: FindingInput = {
+        checkId: 'scanner.ooxml.relationship',
+        engine: 'ooxml',
+        outcome: 'FAIL',
+        reasonCode: 'OOXML_EXTERNAL_RELATIONSHIP',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
         scannedStorageVersionId: 'v-1001',
         scannedSha256: dummySha,
         scannedSizeBytes: 1024,
       };
 
-      const res = decide(blockSuspiciousPolicy, validIdentity, [...cleanFindings, medFinding]);
+      const res = decide(blockPolicy, validIdentity, [...cleanFindings, relFinding]);
       expect(res.decision).toBe('BLOCK');
-      expect(res.rule).toBe('R6');
-      expect(res.riskScore).toBe(25);
-    });
-
-    it('risk-score boundary: riskScore === riskThreshold - 1 does not trigger R6 BLOCK on riskThreshold', () => {
-      // LOW finding has weight 10. With riskThreshold = 11, manualReviewThreshold = 20:
-      const boundaryPolicy: DecisionPolicyInput = {
-        ...defaultPolicy,
-        riskThreshold: 11,
-        manualReviewThreshold: 20,
-      };
-
-      const lowFinding: FindingInput = {
-        checkId: 'scanner.low.1',
-        engine: 'heuristics',
-        outcome: 'WARN',
-        reasonCode: 'LOW_RISK_NOTE',
-        severity: 'LOW', // weight 10
-        confidence: 'LOW',
-        scannedStorageVersionId: 'v-1001',
-        scannedSha256: dummySha,
-        scannedSizeBytes: 1024,
-      };
-
-      const res = decide(boundaryPolicy, validIdentity, [...cleanFindings, lowFinding]);
-      // 10 < 11 (riskThreshold) and 10 < 20 (manualReviewThreshold), but has non-clean finding:
-      // R7 fallback safely catches non-clean findings
-      expect(res.decision).not.toBe('BLOCK');
+      expect(res.rule).toBe('R4');
+      expect(res.primaryReason).toBe('OOXML_EXTERNAL_RELATIONSHIP');
     });
 
     it('triggers policy.onSuspicious (QUARANTINE) on explicit SUSPICIOUS outcome finding', () => {
@@ -674,7 +616,7 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
 
       const res = decide(defaultPolicy, validIdentity, [...cleanFindings, suspiciousFinding]);
       expect(res.decision).toBe('QUARANTINE');
-      expect(res.rule).toBe('R6');
+      expect(res.rule).toBe('R4');
       expect(res.primaryReason).toBe('ANOMALOUS_METADATA');
     });
 
@@ -698,30 +640,112 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
 
       const res = decide(blockPolicy, validIdentity, [...cleanFindings, suspiciousFinding]);
       expect(res.decision).toBe('BLOCK');
-      expect(res.rule).toBe('R6');
+      expect(res.rule).toBe('R4');
       expect(res.primaryReason).toBe('ANOMALOUS_METADATA');
     });
 
-    it('triggers policy.onSuspicious on medium severity FAIL finding (e.g. OOXML external relationship)', () => {
-      const relFinding: FindingInput = {
-        checkId: 'scanner.ooxml.relationship',
-        engine: 'ooxml',
-        outcome: 'FAIL',
-        reasonCode: 'OOXML_EXTERNAL_RELATIONSHIP',
+    it('quarantines when disagreementAction is QUARANTINE and detector disagreement occurs', () => {
+      const disagreementPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        disagreementAction: 'QUARANTINE',
+      };
+
+      const disagreementFinding: FindingInput = {
+        checkId: 'scanner.detector',
+        engine: 'file-type',
+        engineVersion: '1.0.0',
+        signatureVersion: null,
+        outcome: 'WARN',
+        reasonCode: 'DETECTOR_DISAGREEMENT',
         severity: 'MEDIUM',
-        confidence: 'CONFIRMED',
+        confidence: 'HIGH',
         scannedStorageVersionId: 'v-1001',
         scannedSha256: dummySha,
         scannedSizeBytes: 1024,
       };
 
-      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, relFinding]);
+      const res = decide(disagreementPolicy, validIdentity, [
+        ...cleanFindings,
+        disagreementFinding,
+      ]);
       expect(res.decision).toBe('QUARANTINE');
-      expect(res.rule).toBe('R6');
-      expect(res.primaryReason).toBe('OOXML_EXTERNAL_RELATIONSHIP');
+      expect(res.primaryReason).toBe('DETECTOR_DISAGREEMENT');
+      expect(res.rule).toBe('R4');
     });
 
-    it('triggers policy.onSuspicious (QUARANTINE / CDR_REQUIRED) when cdrRequired is true and no CDR check exists', () => {
+    it('quarantines by default when detector disagreement occurs and disagreementAction is not configured', () => {
+      const disagreementFinding: FindingInput = {
+        checkId: 'scanner.detector',
+        engine: 'file-type',
+        engineVersion: '1.0.0',
+        signatureVersion: null,
+        outcome: 'WARN',
+        reasonCode: 'DETECTOR_DISAGREEMENT',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, disagreementFinding]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.primaryReason).toBe('DETECTOR_DISAGREEMENT');
+      expect(res.rule).toBe('R4');
+    });
+
+    it('blocks when disagreementAction is BLOCK and detector disagreement occurs', () => {
+      const blockPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        disagreementAction: 'BLOCK',
+      };
+
+      const disagreementFinding: FindingInput = {
+        checkId: 'scanner.detector',
+        engine: 'file-type',
+        engineVersion: '1.0.0',
+        signatureVersion: null,
+        outcome: 'WARN',
+        reasonCode: 'DETECTOR_DISAGREEMENT',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(blockPolicy, validIdentity, [...cleanFindings, disagreementFinding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('DETECTOR_DISAGREEMENT');
+      expect(res.rule).toBe('R4');
+    });
+
+    it('flags detector disagreement when disagreementAction is FLAG without triggering R4', () => {
+      const flagPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        disagreementAction: 'FLAG',
+      };
+
+      const disagreementFinding: FindingInput = {
+        checkId: 'scanner.detector',
+        engine: 'file-type',
+        outcome: 'WARN',
+        reasonCode: 'DETECTOR_DISAGREEMENT',
+        severity: 'MEDIUM',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(flagPolicy, validIdentity, [...cleanFindings, disagreementFinding]);
+      expect(res.decision).toBe('ALLOW');
+      expect(res.rule).toBe('R7');
+    });
+  });
+
+  describe('Rule R5 — Required Content Disarm and Reconstruction (CDR)', () => {
+    it('quarantines with CDR_REQUIRED_NOT_DONE when cdrRequired is true and no CDR check exists', () => {
       const cdrPolicy: DecisionPolicyInput = {
         ...defaultPolicy,
         cdrRequired: true,
@@ -729,13 +753,13 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
 
       const res = decide(cdrPolicy, validIdentity, cleanFindings);
       expect(res.decision).toBe('QUARANTINE');
-      expect(res.rule).toBe('R6');
-      expect(res.primaryReason).toBe('CDR_REQUIRED');
+      expect(res.rule).toBe('R5');
+      expect(res.primaryReason).toBe('CDR_REQUIRED_NOT_DONE');
       expect(res.severity).toBe('MEDIUM');
       expect(res.scannerResult).toBe('SUSPICIOUS');
     });
 
-    it('triggers policy.onSuspicious (BLOCK / CDR_REQUIRED) when cdrRequired is true and onSuspicious is BLOCK', () => {
+    it('blocks with CDR_REQUIRED_NOT_DONE when cdrRequired is true and onSuspicious is BLOCK', () => {
       const cdrBlockPolicy: DecisionPolicyInput = {
         ...defaultPolicy,
         cdrRequired: true,
@@ -744,8 +768,30 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
 
       const res = decide(cdrBlockPolicy, validIdentity, cleanFindings);
       expect(res.decision).toBe('BLOCK');
-      expect(res.rule).toBe('R6');
-      expect(res.primaryReason).toBe('CDR_REQUIRED');
+      expect(res.rule).toBe('R5');
+      expect(res.primaryReason).toBe('CDR_REQUIRED_NOT_DONE');
+    });
+
+    it('quarantines with CDR_REQUIRED_NOT_DONE when cdrRequired is true and CDR check failed', () => {
+      const cdrPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        cdrRequired: true,
+      };
+
+      const failedCdrFinding: FindingInput = {
+        checkId: 'scanner.cdr',
+        engine: 'cdr-disarm',
+        outcome: 'FAIL',
+        reasonCode: 'CDR_PROCESSING_FAILED',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(cdrPolicy, validIdentity, [...cleanFindings, failedCdrFinding]);
+      expect(res.decision).toBe('QUARANTINE');
     });
 
     it('allows file when cdrRequired is true and a sanitized CDR check with PASS is present', () => {
@@ -770,6 +816,190 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
       expect(res.decision).toBe('ALLOW');
       expect(res.rule).toBe('R7');
       expect(res.primaryReason).toBe('ALL_CHECKS_PASSED');
+    });
+  });
+
+  describe('Rule R6 — Manual-Review Risk Threshold', () => {
+    it('quarantines with RISK_THRESHOLD when cumulative risk score reaches manualReviewThreshold', () => {
+      const quarantinePolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        manualReviewThreshold: 25,
+      };
+
+      // 3 low-risk findings (10 points each): 10 + 10 + 10 = 30 >= 25
+      const low1: FindingInput = {
+        checkId: 'scanner.opt1',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_1',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+      const low2: FindingInput = {
+        checkId: 'scanner.opt2',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_2',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+      const low3: FindingInput = {
+        checkId: 'scanner.opt3',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_3',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(quarantinePolicy, validIdentity, [...cleanFindings, low1, low2, low3]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R6');
+      expect(res.primaryReason).toBe('RISK_THRESHOLD');
+      expect(res.riskScore).toBe(30);
+    });
+
+    it('blocks with RISK_THRESHOLD when risk score meets manualReviewThreshold and policy.onSuspicious === "BLOCK"', () => {
+      const blockPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        manualReviewThreshold: 20,
+        onSuspicious: 'BLOCK',
+      };
+
+      const low1: FindingInput = {
+        checkId: 'scanner.opt1',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_1',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+      const low2: FindingInput = {
+        checkId: 'scanner.opt2',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_2',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(blockPolicy, validIdentity, [...cleanFindings, low1, low2]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.rule).toBe('R6');
+      expect(res.primaryReason).toBe('RISK_THRESHOLD');
+      expect(res.riskScore).toBe(20);
+    });
+
+    it('boundary: risk score equal to manualReviewThreshold (score === threshold) triggers R6', () => {
+      const boundaryPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        manualReviewThreshold: 20,
+      };
+
+      const low1: FindingInput = {
+        checkId: 'scanner.opt1',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_1',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+      const low2: FindingInput = {
+        checkId: 'scanner.opt2',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_2',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(boundaryPolicy, validIdentity, [...cleanFindings, low1, low2]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R6');
+      expect(res.primaryReason).toBe('RISK_THRESHOLD');
+      expect(res.riskScore).toBe(20);
+    });
+
+    it('boundary: risk score immediately below manualReviewThreshold (score === threshold - 1) allows file', () => {
+      const boundaryPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        manualReviewThreshold: 21,
+      };
+
+      const low1: FindingInput = {
+        checkId: 'scanner.opt1',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_1',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+      const low2: FindingInput = {
+        checkId: 'scanner.opt2',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_2',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(boundaryPolicy, validIdentity, [...cleanFindings, low1, low2]);
+      expect(res.decision).toBe('ALLOW');
+      expect(res.rule).toBe('R7');
+      expect(res.primaryReason).toBe('ALL_CHECKS_PASSED');
+      expect(res.riskScore).toBe(20);
+    });
+
+    it('allows clean file with a nonzero risk score below review threshold', () => {
+      const normalPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        manualReviewThreshold: 50,
+      };
+
+      const low1: FindingInput = {
+        checkId: 'scanner.opt1',
+        engine: 'opt',
+        outcome: 'WARN',
+        reasonCode: 'LOW_NOTE_1',
+        severity: 'LOW',
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(normalPolicy, validIdentity, [...cleanFindings, low1]);
+      expect(res.decision).toBe('ALLOW');
+      expect(res.rule).toBe('R7');
+      expect(res.primaryReason).toBe('ALL_CHECKS_PASSED');
+      expect(res.riskScore).toBe(10);
     });
   });
 

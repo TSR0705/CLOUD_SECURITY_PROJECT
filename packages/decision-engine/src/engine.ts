@@ -320,7 +320,8 @@ export function decide(
     }));
 
   const riskThreshold = policy.riskThreshold ?? 50;
-  const manualReviewThreshold = policy.manualReviewThreshold ?? 25;
+  const manualReviewThreshold =
+    policy.manualReview ?? policy.manualReviewThreshold ?? policy.riskThreshold ?? 50;
 
   function buildResult(
     decision: DecisionResult['decision'],
@@ -427,7 +428,7 @@ export function decide(
   }
 
   // =========================================================================
-  // Evaluate Candidate Conditions for R2 (Errors/Missing), R3 (Threats), R5 (Archive)
+  // Evaluate Candidate Conditions for R2 (Errors/Missing) and R3 (Threats)
   // =========================================================================
   const requiredChecks = policy.requiredChecks ?? [];
   const findingCheckIds = normalizedFindings.map((f) => f.checkId);
@@ -455,32 +456,25 @@ export function decide(
 
   const r2Matches = r2MissingCheck !== null || requiredCheckErrors.length > 0;
 
-  // 3. R5 Archive Integrity / Structural Violations (e.g. bomb, slip, corrupt, unsafe path)
-  const archiveStructuralFindings = sortedFindings.filter(
-    (f) =>
-      ARCHIVE_STRUCTURAL_REASONS.has(f.reasonCode) ||
-      (f.checkId.startsWith('scanner.archive') &&
-        (f.outcome === 'FAIL' || f.severity === 'CRITICAL' || f.severity === 'HIGH')),
-  );
-  const r5Matches = archiveStructuralFindings.length > 0;
-
-  // 4. R3 Threat Findings check (Malware, YARA matches, Macros, Active content, etc. - excluding purely archive structural ones)
+  // 3. R3 Threat Findings check (Any finding with outcome === 'FAIL' and severity CRITICAL or HIGH)
+  // Evaluates malware, exploits, archive bombs, zip slips, embedded executables, active content, etc.
   const threatFindings = sortedFindings.filter(
-    (f) =>
-      f.outcome === 'FAIL' &&
-      (f.severity === 'CRITICAL' || f.severity === 'HIGH') &&
-      !ARCHIVE_STRUCTURAL_REASONS.has(f.reasonCode),
+    (f) => f.outcome === 'FAIL' && (f.severity === 'CRITICAL' || f.severity === 'HIGH'),
   );
   const r3Matches = threatFindings.length > 0;
 
   // =========================================================================
-  // R2 / R3 / R5 PRECEDENCE:
-  // Threat detection (R3) and Archive integrity attacks (R5) outrank scanner errors (R2).
-  // If an attacker uploads malware or a zip bomb, and a scanner times out on another check,
-  // the gateway MUST emit BLOCK (R3 or R5), NOT ERROR (R2).
+  // R2 / R3 PRECEDENCE:
+  // Threat detection (R3) outranks scanner errors or missing checks (R2).
+  // If an attacker uploads malware or an exploit, and a scanner times out or a check is missing,
+  // the gateway MUST emit BLOCK (R3), NOT ERROR (R2).
   // =========================================================================
   if (r3Matches) {
     const primaryThreat = threatFindings[0]!;
+    const isArchiveStructural =
+      ARCHIVE_STRUCTURAL_REASONS.has(primaryThreat.reasonCode) ||
+      primaryThreat.checkId.startsWith('scanner.archive');
+
     return buildResult(
       'BLOCK',
       'R3',
@@ -490,24 +484,8 @@ export function decide(
       100,
       'FAIL',
       'FAIL',
-      'PASS',
+      isArchiveStructural ? 'FAIL' : 'PASS',
       ['R1: PASS', `R3: TRIGGERED (${primaryThreat.reasonCode})`],
-    );
-  }
-
-  if (r5Matches) {
-    const primaryStructural = archiveStructuralFindings[0]!;
-    return buildResult(
-      'BLOCK',
-      'R5',
-      primaryStructural.reasonCode,
-      primaryStructural.severity,
-      primaryStructural.confidence,
-      100,
-      'FAIL',
-      'FAIL',
-      'FAIL',
-      ['R1: PASS', `R5: TRIGGERED (${primaryStructural.reasonCode})`],
     );
   }
 
@@ -530,35 +508,56 @@ export function decide(
   }
 
   // =========================================================================
-  // RULE R4: Detector Disagreement / Type Undetermined
-  // Discrepancy between magic bytes, file extension, and MIME.
+  // RULE R4: Medium-Severity and Suspicious Findings
+  // A finding with outcome FAIL and severity MEDIUM, or any finding with outcome SUSPICIOUS,
+  // or WARN with severity MEDIUM (e.g. detector disagreements).
+  // Follows policy.onSuspicious (default QUARANTINE, or BLOCK if configured).
   // =========================================================================
-  const disagreementFindings = sortedFindings.filter((f) => DISAGREEMENT_REASONS.has(f.reasonCode));
+  const mediumOrSuspiciousFindings = sortedFindings.filter(
+    (f) =>
+      f.outcome === 'SUSPICIOUS' ||
+      (f.outcome === 'FAIL' && f.severity === 'MEDIUM') ||
+      ((f.outcome as string) === 'WARN' && f.severity === 'MEDIUM'),
+  );
 
-  const disagreementAction = policy.disagreementAction ?? policy.onSuspicious ?? 'QUARANTINE';
+  if (mediumOrSuspiciousFindings.length > 0) {
+    const primaryFinding = mediumOrSuspiciousFindings[0]!;
+    const isDisagreement = DISAGREEMENT_REASONS.has(primaryFinding.reasonCode);
+    const disagreementAction = policy.disagreementAction;
 
-  if (disagreementFindings.length > 0 && disagreementAction !== 'FLAG') {
-    const primaryDisagreement = disagreementFindings[0]!;
-    const score = Math.max(25, calculateRiskScore(rawFindings));
-    const dec = disagreementAction === 'BLOCK' ? 'BLOCK' : 'QUARANTINE';
-    return buildResult(
-      dec,
-      'R4',
-      primaryDisagreement.reasonCode,
-      'MEDIUM',
-      primaryDisagreement.confidence,
-      score,
-      'PASS',
-      'SUSPICIOUS',
-      'PASS',
-      ['R1: PASS', 'R2: PASS', 'R3: PASS', `R4: TRIGGERED (${primaryDisagreement.reasonCode})`],
-    );
+    if (isDisagreement && disagreementAction === 'FLAG') {
+      // Detector disagreement configured to FLAG: skip R4 terminal decision,
+      // letting finding contribute to risk score in R6/R7.
+    } else {
+      let action: 'QUARANTINE' | 'BLOCK' = policy.onSuspicious ?? 'QUARANTINE';
+      if (isDisagreement && disagreementAction === 'BLOCK') {
+        action = 'BLOCK';
+      }
+
+      const score = Math.max(25, calculateRiskScore(rawFindings));
+      const isArchiveStructural =
+        ARCHIVE_STRUCTURAL_REASONS.has(primaryFinding.reasonCode) ||
+        primaryFinding.checkId.startsWith('scanner.archive');
+
+      return buildResult(
+        action,
+        'R4',
+        primaryFinding.reasonCode,
+        primaryFinding.severity,
+        primaryFinding.confidence,
+        score,
+        'PASS',
+        'SUSPICIOUS',
+        isArchiveStructural ? 'FAIL' : 'PASS',
+        ['R1: PASS', 'R2: PASS', 'R3: PASS', `R4: TRIGGERED (${primaryFinding.reasonCode})`],
+      );
+    }
   }
 
   // =========================================================================
-  // Required CDR Behavior:
-  // If policy mandates CDR disarm/reconstruction, verify a passing CDR finding is present.
-  // If missing or un-disarmed, fail closed via policy.onSuspicious (default QUARANTINE).
+  // RULE R5: Required Content Disarm and Reconstruction (CDR)
+  // When policy.cdrRequired is true and there is no successful CDR finding (outcome === 'PASS').
+  // Return QUARANTINE / CDR_REQUIRED_NOT_DONE.
   // =========================================================================
   if (policy.cdrRequired) {
     const hasPassedCdr = normalizedFindings.some(
@@ -571,65 +570,33 @@ export function decide(
       const score = Math.max(25, calculateRiskScore(rawFindings));
       return buildResult(
         dec,
-        'R6',
-        'CDR_REQUIRED',
+        'R5',
+        'CDR_REQUIRED_NOT_DONE',
         'MEDIUM',
         'CONFIRMED',
         score,
         'PASS',
         'SUSPICIOUS',
         'PASS',
-        [
-          'R1: PASS',
-          'R2: PASS',
-          'R3: PASS',
-          'R4: PASS',
-          'R5: PASS',
-          `R6: TRIGGERED_CDR (${dec} due to cdrRequired without sanitized CDR artifact)`,
-        ],
+        ['R1: PASS', 'R2: PASS', 'R3: PASS', 'R4: PASS', 'R5: TRIGGERED (CDR_REQUIRED_NOT_DONE)'],
       );
     }
   }
 
   // =========================================================================
-  // RULE R6: Risk Score Threshold & Medium / Suspicious Findings
-  // Weighted sum of medium/low findings must remain below policy threshold.
+  // RULE R6: Manual-Review Risk Threshold
+  // When computedRiskScore >= (policy.manualReview ?? policy.manualReviewThreshold ?? 50).
+  // Return QUARANTINE / RISK_THRESHOLD.
   // =========================================================================
   const computedRiskScore = calculateRiskScore(rawFindings);
-  const suspiciousAction = policy.onSuspicious ?? 'QUARANTINE';
 
-  // 1. Hard risk score block
-  if (computedRiskScore >= riskThreshold) {
-    const primaryFinding = sortedFindings[0]!;
+  if (computedRiskScore >= manualReviewThreshold) {
+    const dec = policy.onSuspicious ?? 'QUARANTINE';
     return buildResult(
-      'BLOCK',
+      dec,
       'R6',
-      primaryFinding.reasonCode,
-      primaryFinding.severity,
-      'CONFIRMED',
-      computedRiskScore,
-      'PASS',
-      'FAIL',
-      'PASS',
-      [
-        'R1: PASS',
-        'R2: PASS',
-        'R3: PASS',
-        'R4: PASS',
-        'R5: PASS',
-        `R6: TRIGGERED_BLOCK (${computedRiskScore} >= ${riskThreshold})`,
-      ],
-    );
-  }
-
-  // 2. Risk score reaches or exceeds manual review threshold
-  if (computedRiskScore >= manualReviewThreshold && policy.manualReviewThreshold !== undefined) {
-    const primaryFinding = sortedFindings[0]!;
-    return buildResult(
-      suspiciousAction,
-      'R6',
-      primaryFinding.reasonCode,
-      primaryFinding.severity,
+      'RISK_THRESHOLD',
+      'MEDIUM',
       'HIGH',
       computedRiskScore,
       'PASS',
@@ -641,44 +608,14 @@ export function decide(
         'R3: PASS',
         'R4: PASS',
         'R5: PASS',
-        `R6: TRIGGERED_MANUAL_REVIEW (${suspiciousAction} because ${computedRiskScore} >= ${manualReviewThreshold})`,
-      ],
-    );
-  }
-
-  // 3. Explicit suspicious findings or medium-severity warning
-  const suspiciousFindings = sortedFindings.filter(
-    (f) =>
-      f.outcome === 'SUSPICIOUS' ||
-      ((f.outcome as string) === 'WARN' && f.severity === 'MEDIUM') ||
-      (f.outcome === 'FAIL' && f.severity === 'MEDIUM'),
-  );
-  if (suspiciousFindings.length > 0) {
-    const primarySuspicious = suspiciousFindings[0]!;
-    return buildResult(
-      suspiciousAction,
-      'R6',
-      primarySuspicious.reasonCode,
-      primarySuspicious.severity,
-      primarySuspicious.confidence,
-      Math.max(25, computedRiskScore),
-      'PASS',
-      'SUSPICIOUS',
-      'PASS',
-      [
-        'R1: PASS',
-        'R2: PASS',
-        'R3: PASS',
-        'R4: PASS',
-        'R5: PASS',
-        `R6: TRIGGERED_SUSPICIOUS (${suspiciousAction} due to ${primarySuspicious.reasonCode})`,
+        `R6: TRIGGERED_MANUAL_REVIEW (${computedRiskScore} >= ${manualReviewThreshold})`,
       ],
     );
   }
 
   // =========================================================================
-  // RULE R7: Clean Verification
-  // Only if all checks pass cleanly without error or failure is ALLOW emitted.
+  // RULE R7: Clean Verification / Default Allow
+  // If no higher-priority rule applies, return ALLOW / ALL_CHECKS_PASSED.
   // =========================================================================
   return buildResult(
     'ALLOW',

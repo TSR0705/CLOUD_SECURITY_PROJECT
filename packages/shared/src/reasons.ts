@@ -30,6 +30,11 @@ export type CanonicalReasonCode =
   | 'SCAN_TIMEOUT'
   | 'RESULT_IDENTITY_MISMATCH'
   | 'CDR_REQUIRED'
+  | 'CDR_REQUIRED_NOT_DONE'
+  | 'RISK_THRESHOLD'
+  | 'ALL_CHECKS_PASSED'
+  | 'DETECTOR_DISAGREEMENT'
+  | 'TYPE_UNDETERMINED'
   // Malware / Pattern
   | 'MALWARE_DETECTED'
   // Archive (P16)
@@ -141,6 +146,51 @@ export const REASON_CODE_REGISTRY: Readonly<Record<CanonicalReasonCode, ReasonCo
     defaultConfidence: 'CONFIRMED',
     description:
       'Policy mandates Content Disarm and Reconstruction (CDR), but no sanitized artifact is available.',
+  },
+  CDR_REQUIRED_NOT_DONE: {
+    reasonCode: 'CDR_REQUIRED_NOT_DONE',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'Policy mandates Content Disarm and Reconstruction (CDR), but no sanitized artifact is available.',
+  },
+  RISK_THRESHOLD: {
+    reasonCode: 'RISK_THRESHOLD',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description:
+      'Cumulative risk score of findings reaches or exceeds the policy manual review threshold.',
+  },
+  ALL_CHECKS_PASSED: {
+    reasonCode: 'ALL_CHECKS_PASSED',
+    checkId: 'universal',
+    defaultOutcome: 'PASS',
+    defaultSeverity: 'INFO',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'All policy-mandated security inspection checks passed cleanly without error or threat.',
+  },
+  DETECTOR_DISAGREEMENT: {
+    reasonCode: 'DETECTOR_DISAGREEMENT',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description:
+      'Contradictory file types identified across magic bytes, extension, or MIME header.',
+  },
+  TYPE_UNDETERMINED: {
+    reasonCode: 'TYPE_UNDETERMINED',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description:
+      'Artifact file type could not be definitively determined from header or structure.',
   },
   MALWARE_DETECTED: {
     reasonCode: 'MALWARE_DETECTED',

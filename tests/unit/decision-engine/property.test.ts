@@ -202,8 +202,24 @@ describe('Deterministic Decision Engine — 10,000-Case Property Invariant (Phas
       // Execute deterministic decision
       const result = decide(policy, validIdentity, findings);
 
-      // INVARIANT ASSERTION: MUST NEVER BE ALLOW
+      // INVARIANT 1: MUST NEVER BE ALLOW
       expect(result.decision).not.toBe('ALLOW');
+
+      // INVARIANT 2: A matching R3 HIGH/CRITICAL failure cannot be downgraded to ERROR by a simultaneous R2 condition
+      const hasR3Threat = findings.some(
+        (f) => f.outcome === 'FAIL' && (f.severity === 'CRITICAL' || f.severity === 'HIGH'),
+      );
+      if (hasR3Threat) {
+        expect(result.decision).toBe('BLOCK');
+        expect(result.rule).toBe('R3');
+      }
+
+      // INVARIANT 3: Determinism — Identical input strictly produces identical output
+      const resultRepeat = decide(policy, validIdentity, findings);
+      expect(resultRepeat.decision).toBe(result.decision);
+      expect(resultRepeat.primaryReason).toBe(result.primaryReason);
+      expect(resultRepeat.rule).toBe(result.rule);
+      expect(resultRepeat.riskScore).toBe(result.riskScore);
 
       if (result.decision === 'BLOCK') {
         countBlocks++;
@@ -215,9 +231,57 @@ describe('Deterministic Decision Engine — 10,000-Case Property Invariant (Phas
     }
 
     // Verify statistical diversity across the 10,000 cases:
-    // Both BLOCK (R3/R5 precedence) and ERROR (R2) must be substantially represented!
+    // Both BLOCK (R3 threat precedence) and ERROR (R2 missing/error) must be substantially represented!
     expect(countErrors).toBeGreaterThan(1000);
     expect(countBlocks).toBeGreaterThan(1000);
     expect(countErrors + countBlocks + countQuarantines).toBe(TOTAL_ITERATIONS);
+  });
+
+  it('guarantees invariant: An artifact identity mismatch can NEVER result in ALLOW (1,000 randomized iterations)', () => {
+    const prng = createPrng(0xcafe1234);
+    const dummySha = crypto.createHash('sha256').update('corpus-id-tamper').digest('hex');
+    const validIdentity: FileVersionIdentityInput = {
+      bucket: 'sug-quarantine-test',
+      objectKey: 'quarantine/app/file',
+      storageVersionId: 'v-1',
+      sha256: dummySha,
+      sizeBytes: 2048,
+    };
+
+    const policy: DecisionPolicyInput = {
+      id: '018f3a5e-7a42-7000-8000-000000000001',
+      name: 'strict-identity-policy',
+      version: 1,
+      sha256: dummySha,
+      requiredChecks: ['clamav.instream'],
+      riskThreshold: 50,
+      manualReviewThreshold: 25,
+    };
+
+    for (let i = 0; i < 1000; i++) {
+      const tamperMode = Math.floor(prng() * 3);
+      const tamperedSha = tamperMode === 0 ? crypto.randomBytes(32).toString('hex') : dummySha;
+      const tamperedVer = tamperMode === 1 ? `tampered-ver-${i}` : 'v-1';
+      const tamperedSize = tamperMode === 2 ? 99999 + i : 2048;
+
+      const tamperedFinding: FindingInput = {
+        checkId: 'scanner.clamav',
+        engine: 'clamav',
+        engineVersion: '1.4.0',
+        signatureVersion: '27200',
+        outcome: 'PASS',
+        reasonCode: 'CLEAN',
+        severity: 'INFO',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: tamperedVer,
+        scannedSha256: tamperedSha,
+        scannedSizeBytes: tamperedSize,
+      };
+
+      const result = decide(policy, validIdentity, [tamperedFinding]);
+      expect(result.decision).toBe('BLOCK');
+      expect(result.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
+      expect(result.rule).toBe('R1');
+    }
   });
 });
