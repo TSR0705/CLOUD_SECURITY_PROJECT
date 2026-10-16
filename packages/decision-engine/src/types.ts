@@ -41,6 +41,7 @@ export interface DecisionPolicyInput {
   readonly sha256?: string | undefined;
   readonly requiredChecks?: readonly string[] | undefined;
   readonly scanRequired?: boolean | undefined;
+  readonly cdrRequired?: boolean | undefined;
   readonly onSuspicious?: 'QUARANTINE' | 'BLOCK' | undefined;
   readonly manualReviewThreshold?: number | undefined;
   readonly archiveAllowed?: boolean | undefined;

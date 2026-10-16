@@ -18,7 +18,7 @@ import type {
 } from './types.js';
 import { DECISION_RECORD_SCHEMA } from './types.js';
 import { calculateRiskScore } from './risk.js';
-import { isRequiredCheckSatisfied } from './mapping.js';
+import { isRequiredCheckSatisfied, checkMatches } from './mapping.js';
 
 export const ENGINE_VERSION = '1.0.0' as const;
 
@@ -241,14 +241,14 @@ export function decide(
   const fallbackSha = typeof rawFallbackSha === 'string' ? rawFallbackSha : '0'.repeat(64);
   const fallbackSize = 0;
 
-  // Step 0: If artifact identity itself is invalid or missing, immediately fail closed with ERROR on R1
+  // Step 0: If artifact identity itself is invalid or missing, immediately fail closed with BLOCK on R1
   if (!normIdentity) {
     const nowIso = new Date().toISOString();
     const invalidRecord: DecisionRecordV1 = {
       schema: DECISION_RECORD_SCHEMA,
-      decision: 'ERROR',
+      decision: 'BLOCK',
       rule: 'R1',
-      primaryReason: 'DECISION_IDENTITY_MISMATCH',
+      primaryReason: 'RESULT_IDENTITY_MISMATCH',
       severity: 'HIGH',
       confidence: 'CONFIRMED',
       riskScore: 100,
@@ -273,7 +273,7 @@ export function decide(
         authorizationResult: 'PASS',
       },
       findingReferences: [],
-      reasons: ['DECISION_IDENTITY_MISMATCH'],
+      reasons: ['RESULT_IDENTITY_MISMATCH'],
       ruleTrace: ['R1: FAIL (invalid fileVersion artifact identity)'],
       engineVersion: ENGINE_VERSION,
       decidedAt: nowIso,
@@ -281,8 +281,8 @@ export function decide(
     };
 
     return {
-      decision: 'ERROR',
-      primaryReason: 'DECISION_IDENTITY_MISMATCH',
+      decision: 'BLOCK',
+      primaryReason: 'RESULT_IDENTITY_MISMATCH',
       severity: 'HIGH',
       confidence: 'CONFIRMED',
       riskScore: 100,
@@ -403,6 +403,7 @@ export function decide(
   // =========================================================================
   // RULE R1: Result Identity Verification
   // Scanned hash, storage version ID, and size on findings must equal ingest identity.
+  // Mismatch strictly issues BLOCK / RESULT_IDENTITY_MISMATCH per Table 2.3 & T5.
   // =========================================================================
   for (const f of normalizedFindings) {
     const hashMatch = timingSafeSha256Equal(f.scannedSha256, validIdentity.sha256);
@@ -411,7 +412,7 @@ export function decide(
 
     if (!hashMatch || !verMatch || !sizeMatch) {
       return buildResult(
-        'ERROR',
+        'BLOCK',
         'R1',
         'RESULT_IDENTITY_MISMATCH',
         'HIGH',
@@ -512,7 +513,7 @@ export function decide(
 
   if (r2Matches) {
     const errorReason =
-      r2MissingCheck !== null ? 'CHECK_MISSING' : requiredCheckErrors[0]!.reasonCode;
+      r2MissingCheck !== null ? 'REQUIRED_CHECK_MISSING' : requiredCheckErrors[0]!.reasonCode;
 
     return buildResult(
       'ERROR',
@@ -534,7 +535,7 @@ export function decide(
   // =========================================================================
   const disagreementFindings = sortedFindings.filter((f) => DISAGREEMENT_REASONS.has(f.reasonCode));
 
-  const disagreementAction = policy.disagreementAction ?? 'QUARANTINE';
+  const disagreementAction = policy.disagreementAction ?? policy.onSuspicious ?? 'QUARANTINE';
 
   if (disagreementFindings.length > 0 && disagreementAction !== 'FLAG') {
     const primaryDisagreement = disagreementFindings[0]!;
@@ -555,11 +556,49 @@ export function decide(
   }
 
   // =========================================================================
-  // RULE R6: Risk Score Threshold
+  // Required CDR Behavior:
+  // If policy mandates CDR disarm/reconstruction, verify a passing CDR finding is present.
+  // If missing or un-disarmed, fail closed via policy.onSuspicious (default QUARANTINE).
+  // =========================================================================
+  if (policy.cdrRequired) {
+    const hasPassedCdr = normalizedFindings.some(
+      (f) =>
+        (checkMatches('cdr', f.checkId) || checkMatches('cdr.disarm', f.checkId)) &&
+        f.outcome === 'PASS',
+    );
+    if (!hasPassedCdr) {
+      const dec = policy.onSuspicious ?? 'QUARANTINE';
+      const score = Math.max(25, calculateRiskScore(rawFindings));
+      return buildResult(
+        dec,
+        'R6',
+        'CDR_REQUIRED',
+        'MEDIUM',
+        'CONFIRMED',
+        score,
+        'PASS',
+        'SUSPICIOUS',
+        'PASS',
+        [
+          'R1: PASS',
+          'R2: PASS',
+          'R3: PASS',
+          'R4: PASS',
+          'R5: PASS',
+          `R6: TRIGGERED_CDR (${dec} due to cdrRequired without sanitized CDR artifact)`,
+        ],
+      );
+    }
+  }
+
+  // =========================================================================
+  // RULE R6: Risk Score Threshold & Medium / Suspicious Findings
   // Weighted sum of medium/low findings must remain below policy threshold.
   // =========================================================================
   const computedRiskScore = calculateRiskScore(rawFindings);
+  const suspiciousAction = policy.onSuspicious ?? 'QUARANTINE';
 
+  // 1. Hard risk score block
   if (computedRiskScore >= riskThreshold) {
     const primaryFinding = sortedFindings[0]!;
     return buildResult(
@@ -583,10 +622,11 @@ export function decide(
     );
   }
 
+  // 2. Risk score reaches or exceeds manual review threshold
   if (computedRiskScore >= manualReviewThreshold && policy.manualReviewThreshold !== undefined) {
     const primaryFinding = sortedFindings[0]!;
     return buildResult(
-      'QUARANTINE',
+      suspiciousAction,
       'R6',
       primaryFinding.reasonCode,
       primaryFinding.severity,
@@ -601,14 +641,44 @@ export function decide(
         'R3: PASS',
         'R4: PASS',
         'R5: PASS',
-        `R6: TRIGGERED_QUARANTINE (${computedRiskScore} >= ${manualReviewThreshold})`,
+        `R6: TRIGGERED_MANUAL_REVIEW (${suspiciousAction} because ${computedRiskScore} >= ${manualReviewThreshold})`,
+      ],
+    );
+  }
+
+  // 3. Explicit suspicious findings or medium-severity warning
+  const suspiciousFindings = sortedFindings.filter(
+    (f) =>
+      f.outcome === 'SUSPICIOUS' ||
+      ((f.outcome as string) === 'WARN' && f.severity === 'MEDIUM') ||
+      (f.outcome === 'FAIL' && f.severity === 'MEDIUM'),
+  );
+  if (suspiciousFindings.length > 0) {
+    const primarySuspicious = suspiciousFindings[0]!;
+    return buildResult(
+      suspiciousAction,
+      'R6',
+      primarySuspicious.reasonCode,
+      primarySuspicious.severity,
+      primarySuspicious.confidence,
+      Math.max(25, computedRiskScore),
+      'PASS',
+      'SUSPICIOUS',
+      'PASS',
+      [
+        'R1: PASS',
+        'R2: PASS',
+        'R3: PASS',
+        'R4: PASS',
+        'R5: PASS',
+        `R6: TRIGGERED_SUSPICIOUS (${suspiciousAction} due to ${primarySuspicious.reasonCode})`,
       ],
     );
   }
 
   // =========================================================================
   // RULE R7: Clean Verification
-  // Only if all checks pass without error is ALLOW emitted.
+  // Only if all checks pass cleanly without error or failure is ALLOW emitted.
   // =========================================================================
   return buildResult(
     'ALLOW',

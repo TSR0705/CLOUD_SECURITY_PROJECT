@@ -53,6 +53,10 @@ describe('Deterministic Decision Engine — 10,000-Case Property Invariant (Phas
   const SEVERITIES: SeverityLevel[] = ['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'ERROR'];
   const OUTCOMES: FindingOutcome[] = ['PASS', 'WARN', 'FAIL', 'ERROR', 'INFO'];
   const ERROR_REASONS = [
+    'SCANNER_UNAVAILABLE',
+    'SCAN_TIMEOUT',
+    'REQUIRED_CHECK_MISSING',
+    'SCANNER_ERROR',
     'SCANNER_TIMEOUT',
     'CONNECTION_REFUSED',
     'PARSER_CRASH',
@@ -98,6 +102,8 @@ describe('Deterministic Decision Engine — 10,000-Case Property Invariant (Phas
         version: 1,
         sha256: dummySha,
         requiredChecks: requiredCheckNames,
+        cdrRequired: prng() < 0.2,
+        onSuspicious: prng() < 0.5 ? 'QUARANTINE' : 'BLOCK',
         riskThreshold: 30 + Math.floor(prng() * 50), // 30-80
         manualReviewThreshold: 10 + Math.floor(prng() * 20), // 10-30
       };

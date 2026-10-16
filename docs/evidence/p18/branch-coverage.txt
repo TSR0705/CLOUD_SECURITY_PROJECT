@@ -10,15 +10,16 @@ Output:
  RUN  v5.0.1 C:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT
       Coverage enabled with v8
 
- ✓ tests/unit/decision-engine/property.test.ts (1 test) 216ms
- ✓ tests/unit/decision-engine/rules.test.ts (23 tests) 14ms
- ✓ tests/unit/decision-engine/edge-cases.test.ts (19 tests) 15ms
- ✓ tests/unit/decision-engine/review.test.ts (9 tests) 4ms
+ ✓ tests/unit/decision-engine/property.test.ts (1 test) 236ms
+ ✓ tests/unit/decision-engine/rules.test.ts (34 tests) 20ms
+ ✓ tests/unit/decision-engine/edge-cases.test.ts (19 tests) 17ms
+ ✓ tests/unit/decision-engine/review.test.ts (9 tests) 5ms
  ✓ tests/unit/decision-engine/persistence.test.ts (3 tests) 4ms
 
  Test Files  5 passed (5)
-      Tests  55 passed (55)
-   Duration  1.36s
+      Tests  66 passed (66)
+   Start at  09:26:07
+   Duration  1.55s
 
  % Coverage report from v8
 -------------------|---------|----------|---------|---------|-------------------
@@ -41,5 +42,5 @@ SUMMARY OF METRICS:
   Functions:  100.00% (All functions covered)
   Lines:      100.00% (All lines covered)
 
-VERDICT: PASS
-100% branch and statement coverage requirement for P18 decision-engine is fully satisfied.
+VERDICT: FULL PASS
+100% branch and statement coverage requirement for P18 decision-engine is fully satisfied across all 7 source files.

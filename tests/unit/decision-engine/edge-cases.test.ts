@@ -273,7 +273,7 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
         },
       ]);
       // Scanned sha mismatch triggers R1
-      expect(res.decision).toBe('ERROR');
+      expect(res.decision).toBe('BLOCK');
       expect(res.rule).toBe('R1');
       expect(res.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
     });
@@ -424,11 +424,11 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
       expect(scoreFailUnknown).toBe(0);
     });
 
-    it('handles empty findings with required checks in engine -> R2 CHECK_MISSING', () => {
+    it('handles empty findings with required checks in engine -> R2 REQUIRED_CHECK_MISSING', () => {
       const res = decide(defaultPolicy, validIdentity, []);
       expect(res.decision).toBe('ERROR');
       expect(res.rule).toBe('R2');
-      expect(res.primaryReason).toBe('CHECK_MISSING');
+      expect(res.primaryReason).toBe('REQUIRED_CHECK_MISSING');
     });
 
     it('handles empty reasonCode on errors and threats with default fallbacks', () => {
@@ -476,9 +476,9 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
           null as unknown as FindingInput[],
         ),
       ).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
-        primaryReason: 'DECISION_IDENTITY_MISMATCH',
+        primaryReason: 'RESULT_IDENTITY_MISMATCH',
       });
 
       // valid identity with null findings
@@ -497,13 +497,13 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
       expect(
         decide(defaultPolicy, { ...validIdentity, bucket: 123 as unknown as string }, []),
       ).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
       });
 
       // whitespace bucket
       expect(decide(defaultPolicy, { ...validIdentity, bucket: '   ' }, [])).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
       });
 
@@ -533,13 +533,13 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
 
       // empty sha256 -> !canonicalSha branch
       expect(decide(defaultPolicy, { ...validIdentity, sha256: '' }, [])).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
       });
 
       // non-integer sizeBytes (e.g. 10.5)
       expect(decide(defaultPolicy, { ...validIdentity, sizeBytes: 10.5 }, [])).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
       });
 
@@ -547,7 +547,7 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
       expect(
         decide(defaultPolicy, { ...validIdentity, sizeBytes: undefined as unknown as number }, []),
       ).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
       });
     });
@@ -567,9 +567,10 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
       };
 
       const res = decide(defaultPolicy, validIdentity, [minimalFinding]);
-      // scannedStorageVersionId mismatch -> R1 ERROR
-      expect(res.decision).toBe('ERROR');
+      // scannedStorageVersionId mismatch -> R1 BLOCK
+      expect(res.decision).toBe('BLOCK');
       expect(res.rule).toBe('R1');
+      expect(res.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
 
       // Sort tie-breaker: two findings with equal severity and equal confidence
       const finding1: FindingInput = {
@@ -642,8 +643,9 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
         scannedSizeBytes: 500,
       };
       expect(decide(defaultPolicy, validIdentity, [emptyShaFinding])).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
+        primaryReason: 'RESULT_IDENTITY_MISMATCH',
       });
 
       // Missing objectKey and object_key
@@ -654,8 +656,9 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
           [],
         ),
       ).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
+        primaryReason: 'RESULT_IDENTITY_MISMATCH',
       });
 
       // Missing storageVersionId and storage_version_id
@@ -666,8 +669,9 @@ describe('Decision Engine — Branch Coverage Edge Cases', () => {
           [],
         ),
       ).toMatchObject({
-        decision: 'ERROR',
+        decision: 'BLOCK',
         rule: 'R1',
+        primaryReason: 'RESULT_IDENTITY_MISMATCH',
       });
     });
 

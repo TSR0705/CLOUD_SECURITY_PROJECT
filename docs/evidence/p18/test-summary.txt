@@ -13,7 +13,7 @@ Scope Boundaries & Non-Goals Strictly Observed:
   - Phase P18 is strictly a DETERMINISTIC DECISION and REVIEW EVALUATION phase.
   - Phase P18 DOES NOT implement P19 envelope encryption (AES-256-GCM / KMS).
   - Phase P18 DOES NOT implement P20 clean promotion / TOCTOU verification.
-  - All decisions are pure, explainable, and bound to immutable artifact identities.
+  - All decisions are pure mathematical evaluations, explainable, and bound to immutable artifact identities.
 
 2. QUALITY GATE RESULTS
 --------------------------------------------------------------------------------
@@ -29,7 +29,7 @@ Gate 2: ESLint Linter
 
 Gate 3: Code Formatting
   Command: pnpm format:check (prettier --check .)
-  Result: PASS (All files adhere to formatting rules)
+  Result: PASS (All files adhere to Prettier code style)
 
 Gate 4: OpenAPI Contract Validation
   Command: pnpm openapi:check (node scripts/generate-openapi.mjs --check)
@@ -37,11 +37,16 @@ Gate 4: OpenAPI Contract Validation
 
 Gate 5: YARA-X Rule Validation
   Command: pnpm rules:validate (node scripts/validate-yara-rules.mjs packages/scanner/rules)
-  Result: PASS (Manifest generated, version: ec10eb959fc4ed92f2b766e6fc481fd9cbfbe24c)
+  Result: PASS (All YARA-X rules compiled and passed metadata validation)
 
-Gate 6: Secret Scanning & Clean Working Tree
+Gate 6: Whitespace & Diff Hygiene
   Command: git diff --check
-  Result: PASS (No whitespace errors, clean diff)
+  Result: PASS (Clean diff, zero whitespace or conflict markers)
+
+Gate 7: Security & Secrets Hygiene Note
+  Status: Honest disclosure - Gitleaks is not installed on the Windows host CLI
+  and Docker daemon is not running locally. Clean git status and no credentials
+  or secrets committed.
 
 3. CODE COVERAGE SUMMARY (packages/decision-engine)
 --------------------------------------------------------------------------------
@@ -61,17 +66,17 @@ File Coverage:
     types.ts         |     100 |      100 |     100 |     100 |
   -------------------|---------|----------|---------|---------|
 
-Branch Coverage: 100.00% (TARGET MET: >= 100%)
+Branch Coverage: 100.00% (TARGET MET: 100%)
 Statements:      100.00%
 Functions:       100.00%
 Lines:           100.00%
 
 4. CORE SUITE EXECUTION METRICS
 --------------------------------------------------------------------------------
-Total hermetic unit & integration tests executed: 583 passed across 37 test files.
+Total hermetic unit & integration tests executed: 594 passed across 37 test files.
 Decision Engine Suite Breakdown:
-  - tests/unit/decision-engine/rules.test.ts:        23 tests (Rules R1–R7, R2/R3 precedence)
-  - tests/unit/decision-engine/property.test.ts:      1 test  (10,000 pseudo-random invariant trials)
+  - tests/unit/decision-engine/rules.test.ts:        34 tests (Rules R1–R7, R2/R3 precedence, CDR, onSuspicious, boundaries)
+  - tests/unit/decision-engine/property.test.ts:      1 test  (10,000 pseudo-random invariant trials, 0 ALLOW on error)
   - tests/unit/decision-engine/review.test.ts:        9 tests (Human review workflow, fail-closed guards)
   - tests/unit/decision-engine/persistence.test.ts:   3 tests (Database insertion, explainable record binding)
   - tests/unit/decision-engine/edge-cases.test.ts:   19 tests (Exhaustive branch edge case trials)
@@ -79,4 +84,4 @@ Decision Engine Suite Breakdown:
   - tests/integration/decision/policy-03.test.ts:     1 test  (Canonical policy-03 DoD lifecycle)
 
 VERDICT: FULL PASS
-Phase P18 is complete, verified, and ready for phase close.
+Phase P18 rule reconciliation and verification is complete, verified, and ready for phase close.

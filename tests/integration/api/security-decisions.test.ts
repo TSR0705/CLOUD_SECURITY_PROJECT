@@ -432,8 +432,8 @@ describe('API Integration — Security Decisions & Human Review Endpoints (Phase
         ...mockDbRows[decisionIdA],
         id: errorDecisionId,
         decision: 'ERROR',
-        primary_reason: 'CHECK_MISSING',
-        severity: 'ERROR',
+        primary_reason: 'REQUIRED_CHECK_MISSING',
+        severity: 'HIGH',
       };
 
       const analystToken = await createDashboardToken(

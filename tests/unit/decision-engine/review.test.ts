@@ -143,8 +143,8 @@ describe('Deterministic Decision Engine — Human Review Workflow (Phase P18)', 
       const errorDecision: ExistingDecision = {
         ...baseDecision,
         decision: 'ERROR',
-        primary_reason: 'CHECK_MISSING',
-        severity: 'ERROR',
+        primary_reason: 'REQUIRED_CHECK_MISSING',
+        severity: 'HIGH',
       };
 
       const reviewReq: ReviewRequest = {

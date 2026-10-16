@@ -50,6 +50,11 @@ const CANONICAL_CHECK_MAP: Readonly<Record<string, readonly string[]>> = {
   'magic.detect': ['validator.magic', 'magic.detect', 'magic'],
   'type.consistency': ['validator.type', 'type.consistency', 'type'],
   'size.limit': ['validator.size', 'size.limit', 'size'],
+
+  // CDR (Content Disarm & Reconstruction)
+  cdr: ['scanner.cdr', 'cdr.disarm', 'cdr'],
+  'cdr.disarm': ['scanner.cdr', 'cdr.disarm', 'cdr'],
+  'scanner.cdr': ['scanner.cdr', 'cdr.disarm', 'cdr'],
 };
 
 /**

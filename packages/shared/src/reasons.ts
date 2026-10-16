@@ -25,6 +25,11 @@ export type CanonicalReasonCode =
   | 'CLEAN'
   | 'SCANNER_ERROR'
   | 'NOT_APPLICABLE'
+  | 'REQUIRED_CHECK_MISSING'
+  | 'SCANNER_UNAVAILABLE'
+  | 'SCAN_TIMEOUT'
+  | 'RESULT_IDENTITY_MISMATCH'
+  | 'CDR_REQUIRED'
   // Malware / Pattern
   | 'MALWARE_DETECTED'
   // Archive (P16)
@@ -93,6 +98,49 @@ export const REASON_CODE_REGISTRY: Readonly<Record<CanonicalReasonCode, ReasonCo
     defaultSeverity: 'INFO',
     defaultConfidence: 'CONFIRMED',
     description: 'Detector not applicable to the artifact format or MIME type.',
+  },
+  REQUIRED_CHECK_MISSING: {
+    reasonCode: 'REQUIRED_CHECK_MISSING',
+    checkId: 'universal',
+    defaultOutcome: 'ERROR',
+    defaultSeverity: 'HIGH',
+    defaultConfidence: 'CONFIRMED',
+    description: 'A required inspection check mandated by policy was omitted or not performed.',
+  },
+  SCANNER_UNAVAILABLE: {
+    reasonCode: 'SCANNER_UNAVAILABLE',
+    checkId: 'universal',
+    defaultOutcome: 'ERROR',
+    defaultSeverity: 'HIGH',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'Underlying scanner daemon or service is offline, unreachable, or signature database is stale.',
+  },
+  SCAN_TIMEOUT: {
+    reasonCode: 'SCAN_TIMEOUT',
+    checkId: 'universal',
+    defaultOutcome: 'ERROR',
+    defaultSeverity: 'HIGH',
+    defaultConfidence: 'CONFIRMED',
+    description: 'Scanner inspection exceeded execution time ceiling.',
+  },
+  RESULT_IDENTITY_MISMATCH: {
+    reasonCode: 'RESULT_IDENTITY_MISMATCH',
+    checkId: 'universal',
+    defaultOutcome: 'FAIL',
+    defaultSeverity: 'HIGH',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'Scanned artifact identity (hash, version, size) does not match immutable file version identity.',
+  },
+  CDR_REQUIRED: {
+    reasonCode: 'CDR_REQUIRED',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'Policy mandates Content Disarm and Reconstruction (CDR), but no sanitized artifact is available.',
   },
   MALWARE_DETECTED: {
     reasonCode: 'MALWARE_DETECTED',

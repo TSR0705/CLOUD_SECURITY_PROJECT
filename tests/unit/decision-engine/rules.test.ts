@@ -62,14 +62,14 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
   ];
 
   describe('Rule R1 — Artifact Identity Verification', () => {
-    it('fails closed (ERROR / DECISION_IDENTITY_MISMATCH) if fileVersion identity is null or missing fields', () => {
+    it('fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) if fileVersion identity is null or missing fields', () => {
       const resNull = decide(
         defaultPolicy,
         null as unknown as FileVersionIdentityInput,
         cleanFindings,
       );
-      expect(resNull.decision).toBe('ERROR');
-      expect(resNull.primaryReason).toBe('DECISION_IDENTITY_MISMATCH');
+      expect(resNull.decision).toBe('BLOCK');
+      expect(resNull.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
       expect(resNull.rule).toBe('R1');
 
       const resMissingKey = decide(
@@ -77,8 +77,8 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
         { ...validIdentity, objectKey: '' },
         cleanFindings,
       );
-      expect(resMissingKey.decision).toBe('ERROR');
-      expect(resMissingKey.primaryReason).toBe('DECISION_IDENTITY_MISMATCH');
+      expect(resMissingKey.decision).toBe('BLOCK');
+      expect(resMissingKey.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
       expect(resMissingKey.rule).toBe('R1');
 
       const resMissingBucket = decide(
@@ -86,7 +86,7 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
         { ...validIdentity, bucket: '' },
         cleanFindings,
       );
-      expect(resMissingBucket.decision).toBe('ERROR');
+      expect(resMissingBucket.decision).toBe('BLOCK');
       expect(resMissingBucket.rule).toBe('R1');
 
       const resBadVersion = decide(
@@ -94,7 +94,7 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
         { ...validIdentity, storageVersionId: 'null' },
         cleanFindings,
       );
-      expect(resBadVersion.decision).toBe('ERROR');
+      expect(resBadVersion.decision).toBe('BLOCK');
       expect(resBadVersion.rule).toBe('R1');
 
       const resLatestVersion = decide(
@@ -102,33 +102,33 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
         { ...validIdentity, storageVersionId: 'latest' },
         cleanFindings,
       );
-      expect(resLatestVersion.decision).toBe('ERROR');
+      expect(resLatestVersion.decision).toBe('BLOCK');
       expect(resLatestVersion.rule).toBe('R1');
     });
 
-    it('fails closed (ERROR / DECISION_IDENTITY_MISMATCH) on invalid SHA-256 or negative size', () => {
+    it('fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) on invalid SHA-256 or negative size', () => {
       const resBadSha = decide(
         defaultPolicy,
         { ...validIdentity, sha256: 'not-a-valid-sha' },
         cleanFindings,
       );
-      expect(resBadSha.decision).toBe('ERROR');
-      expect(resBadSha.primaryReason).toBe('DECISION_IDENTITY_MISMATCH');
+      expect(resBadSha.decision).toBe('BLOCK');
+      expect(resBadSha.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
       expect(resBadSha.rule).toBe('R1');
 
       const resNegSize = decide(defaultPolicy, { ...validIdentity, sizeBytes: -5 }, cleanFindings);
-      expect(resNegSize.decision).toBe('ERROR');
+      expect(resNegSize.decision).toBe('BLOCK');
       expect(resNegSize.rule).toBe('R1');
     });
 
-    it('fails closed (ERROR / RESULT_IDENTITY_MISMATCH) if finding scannedSha256 does not match fileVersion identity', () => {
+    it('fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) if finding scannedSha256 does not match fileVersion identity', () => {
       const mismatchedFinding: FindingInput = {
         ...cleanFindings[0]!,
         scannedSha256: 'b'.repeat(64),
       };
 
       const res = decide(defaultPolicy, validIdentity, [mismatchedFinding, cleanFindings[1]!]);
-      expect(res.decision).toBe('ERROR');
+      expect(res.decision).toBe('BLOCK');
       expect(res.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
       expect(res.rule).toBe('R1');
       expect(res.riskScore).toBe(100);
@@ -136,26 +136,26 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
       expect(res.confidence).toBe('CONFIRMED');
     });
 
-    it('fails closed (ERROR / RESULT_IDENTITY_MISMATCH) if finding scannedStorageVersionId does not match', () => {
+    it('fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) if finding scannedStorageVersionId does not match', () => {
       const mismatchedFinding: FindingInput = {
         ...cleanFindings[0]!,
         scannedStorageVersionId: 'v-9999-wrong',
       };
 
       const res = decide(defaultPolicy, validIdentity, [mismatchedFinding, cleanFindings[1]!]);
-      expect(res.decision).toBe('ERROR');
+      expect(res.decision).toBe('BLOCK');
       expect(res.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
       expect(res.rule).toBe('R1');
     });
 
-    it('fails closed (ERROR / RESULT_IDENTITY_MISMATCH) if finding scannedSizeBytes does not match', () => {
+    it('fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) if finding scannedSizeBytes does not match', () => {
       const mismatchedFinding: FindingInput = {
         ...cleanFindings[0]!,
         scannedSizeBytes: 999999,
       };
 
       const res = decide(defaultPolicy, validIdentity, [mismatchedFinding, cleanFindings[1]!]);
-      expect(res.decision).toBe('ERROR');
+      expect(res.decision).toBe('BLOCK');
       expect(res.primaryReason).toBe('RESULT_IDENTITY_MISMATCH');
       expect(res.rule).toBe('R1');
     });
@@ -176,17 +176,62 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
   });
 
   describe('Rule R2 — Required Checks & Scanner Errors', () => {
-    it('fails closed (ERROR / CHECK_MISSING) when a required check is omitted from findings', () => {
+    it('fails closed (ERROR / REQUIRED_CHECK_MISSING) when a required check is omitted from findings', () => {
       // Policy requires clamav and yara; findings only contain clamav
       const res = decide(defaultPolicy, validIdentity, [cleanFindings[0]!]);
       expect(res.decision).toBe('ERROR');
-      expect(res.primaryReason).toBe('CHECK_MISSING');
+      expect(res.primaryReason).toBe('REQUIRED_CHECK_MISSING');
       expect(res.rule).toBe('R2');
       expect(res.scannerResult).toBe('ERROR');
       expect(res.riskScore).toBe(100);
     });
 
-    it('fails closed (ERROR / SCANNER_FAILURE) when a required check produces an ERROR finding', () => {
+    it('fails closed (ERROR / SCANNER_UNAVAILABLE) when scanner daemon is offline or signatures stale', () => {
+      const unavailableFinding: FindingInput = {
+        checkId: 'scanner.clamav',
+        engine: 'clamav',
+        engineVersion: '1.4.0',
+        signatureVersion: 'stale-7-days',
+        outcome: 'ERROR',
+        reasonCode: 'SCANNER_UNAVAILABLE',
+        severity: 'HIGH',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [unavailableFinding, cleanFindings[1]!]);
+      expect(res.decision).toBe('ERROR');
+      expect(res.primaryReason).toBe('SCANNER_UNAVAILABLE');
+      expect(res.rule).toBe('R2');
+      expect(res.scannerResult).toBe('ERROR');
+      expect(res.riskScore).toBe(100);
+    });
+
+    it('fails closed (ERROR / SCAN_TIMEOUT) when scanner execution times out', () => {
+      const timeoutFinding: FindingInput = {
+        checkId: 'scanner.clamav',
+        engine: 'clamav',
+        engineVersion: '1.4.0',
+        signatureVersion: '27200',
+        outcome: 'ERROR',
+        reasonCode: 'SCAN_TIMEOUT',
+        severity: 'HIGH',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [timeoutFinding, cleanFindings[1]!]);
+      expect(res.decision).toBe('ERROR');
+      expect(res.primaryReason).toBe('SCAN_TIMEOUT');
+      expect(res.rule).toBe('R2');
+      expect(res.scannerResult).toBe('ERROR');
+    });
+
+    it('fails closed (ERROR / CLAMAV_SCAN_TIMEOUT) when a specific error reason code is emitted', () => {
       const errorFinding: FindingInput = {
         checkId: 'scanner.clamav',
         engine: 'clamav',
@@ -194,7 +239,7 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
         signatureVersion: '27200',
         outcome: 'ERROR',
         reasonCode: 'CLAMAV_SCAN_TIMEOUT',
-        severity: 'ERROR',
+        severity: 'HIGH',
         confidence: 'CONFIRMED',
         scannedStorageVersionId: 'v-1001',
         scannedSha256: dummySha,
@@ -533,7 +578,7 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
       expect(res.primaryReason).toBe('SUSPICIOUS_HEURISTIC_1');
     });
 
-    it('quarantines when risk score meets manualReviewThreshold', () => {
+    it('quarantines when risk score meets manualReviewThreshold (default onSuspicious QUARANTINE)', () => {
       const quarantinePolicy: DecisionPolicyInput = {
         ...defaultPolicy,
         riskThreshold: 80,
@@ -559,9 +604,176 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
       expect(res.rule).toBe('R6');
       expect(res.riskScore).toBe(25);
     });
+
+    it('blocks when risk score meets manualReviewThreshold and policy.onSuspicious === "BLOCK"', () => {
+      const blockSuspiciousPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        riskThreshold: 80,
+        manualReviewThreshold: 25,
+        onSuspicious: 'BLOCK',
+      };
+
+      const medFinding: FindingInput = {
+        checkId: 'scanner.heuristic.1',
+        engine: 'heuristics',
+        engineVersion: '1.0.0',
+        signatureVersion: null,
+        outcome: 'WARN',
+        reasonCode: 'SUSPICIOUS_HEURISTIC_1',
+        severity: 'MEDIUM', // weight 25
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(blockSuspiciousPolicy, validIdentity, [...cleanFindings, medFinding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.rule).toBe('R6');
+      expect(res.riskScore).toBe(25);
+    });
+
+    it('risk-score boundary: riskScore === riskThreshold - 1 does not trigger R6 BLOCK on riskThreshold', () => {
+      // LOW finding has weight 10. With riskThreshold = 11, manualReviewThreshold = 20:
+      const boundaryPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        riskThreshold: 11,
+        manualReviewThreshold: 20,
+      };
+
+      const lowFinding: FindingInput = {
+        checkId: 'scanner.low.1',
+        engine: 'heuristics',
+        outcome: 'WARN',
+        reasonCode: 'LOW_RISK_NOTE',
+        severity: 'LOW', // weight 10
+        confidence: 'LOW',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(boundaryPolicy, validIdentity, [...cleanFindings, lowFinding]);
+      // 10 < 11 (riskThreshold) and 10 < 20 (manualReviewThreshold), but has non-clean finding:
+      // R7 fallback safely catches non-clean findings
+      expect(res.decision).not.toBe('BLOCK');
+    });
+
+    it('triggers policy.onSuspicious (QUARANTINE) on explicit SUSPICIOUS outcome finding', () => {
+      const suspiciousFinding: FindingInput = {
+        checkId: 'scanner.format.custom',
+        engine: 'custom',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'ANOMALOUS_METADATA',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, suspiciousFinding]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R6');
+      expect(res.primaryReason).toBe('ANOMALOUS_METADATA');
+    });
+
+    it('triggers policy.onSuspicious (BLOCK) on explicit SUSPICIOUS outcome finding when onSuspicious is BLOCK', () => {
+      const blockPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        onSuspicious: 'BLOCK',
+      };
+
+      const suspiciousFinding: FindingInput = {
+        checkId: 'scanner.format.custom',
+        engine: 'custom',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'ANOMALOUS_METADATA',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(blockPolicy, validIdentity, [...cleanFindings, suspiciousFinding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.rule).toBe('R6');
+      expect(res.primaryReason).toBe('ANOMALOUS_METADATA');
+    });
+
+    it('triggers policy.onSuspicious on medium severity FAIL finding (e.g. OOXML external relationship)', () => {
+      const relFinding: FindingInput = {
+        checkId: 'scanner.ooxml.relationship',
+        engine: 'ooxml',
+        outcome: 'FAIL',
+        reasonCode: 'OOXML_EXTERNAL_RELATIONSHIP',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, relFinding]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R6');
+      expect(res.primaryReason).toBe('OOXML_EXTERNAL_RELATIONSHIP');
+    });
+
+    it('triggers policy.onSuspicious (QUARANTINE / CDR_REQUIRED) when cdrRequired is true and no CDR check exists', () => {
+      const cdrPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        cdrRequired: true,
+      };
+
+      const res = decide(cdrPolicy, validIdentity, cleanFindings);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R6');
+      expect(res.primaryReason).toBe('CDR_REQUIRED');
+      expect(res.severity).toBe('MEDIUM');
+      expect(res.scannerResult).toBe('SUSPICIOUS');
+    });
+
+    it('triggers policy.onSuspicious (BLOCK / CDR_REQUIRED) when cdrRequired is true and onSuspicious is BLOCK', () => {
+      const cdrBlockPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        cdrRequired: true,
+        onSuspicious: 'BLOCK',
+      };
+
+      const res = decide(cdrBlockPolicy, validIdentity, cleanFindings);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.rule).toBe('R6');
+      expect(res.primaryReason).toBe('CDR_REQUIRED');
+    });
+
+    it('allows file when cdrRequired is true and a sanitized CDR check with PASS is present', () => {
+      const cdrPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        cdrRequired: true,
+      };
+
+      const cdrFinding: FindingInput = {
+        checkId: 'scanner.cdr',
+        engine: 'cdr-disarm',
+        outcome: 'PASS',
+        reasonCode: 'CLEAN',
+        severity: 'INFO',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(cdrPolicy, validIdentity, [...cleanFindings, cdrFinding]);
+      expect(res.decision).toBe('ALLOW');
+      expect(res.rule).toBe('R7');
+      expect(res.primaryReason).toBe('ALL_CHECKS_PASSED');
+    });
   });
 
-  describe('Rule R7 — Clean Allow', () => {
+  describe('Rule R7 — Clean Allow & Fail-Closed Fallback', () => {
     it('produces ALLOW when all required checks pass cleanly and risk score is 0', () => {
       const res = decide(defaultPolicy, validIdentity, cleanFindings);
       expect(res.decision).toBe('ALLOW');
@@ -574,6 +786,13 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
       expect(res.scannerResult).toBe('PASS');
       expect(res.integrityResult).toBe('PASS');
       expect(res.authorizationResult).toBe('PASS');
+    });
+
+    it('produces ALLOW when risk score is below manual review threshold and all checks are clear', () => {
+      const res = decide(defaultPolicy, validIdentity, cleanFindings);
+      expect(res.decision).toBe('ALLOW');
+      expect(res.rule).toBe('R7');
+      expect(res.primaryReason).toBe('ALL_CHECKS_PASSED');
     });
 
     it('produces an explainable sug.decision/v1 record with complete provenance', () => {
