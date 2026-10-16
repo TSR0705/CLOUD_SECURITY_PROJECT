@@ -117,10 +117,33 @@ Output:
  ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R7 — Clean Allow & Fail-Closed Fallback > produces ALLOW when risk score is below manual review threshold and all checks are clear
  ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R7 — Clean Allow & Fail-Closed Fallback > produces an explainable sug.decision/v1 record with complete provenance
  ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R7 — Clean Allow & Fail-Closed Fallback > sorts reasons deterministically
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention > does not bypass R4 when a FLAG disagreement is present alongside a MEDIUM failure
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention > does not bypass R4 when a FLAG disagreement is present alongside another SUSPICIOUS finding
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention > evaluates multiple disagreements and multiple medium findings deterministically
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention > elevates decision to BLOCK when disagreementAction is BLOCK even if non-disagreement candidate is ranked first
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P2 Regression — Canonical Archive Structural Reason Classification & Integrity > blocks and marks integrityResult FAIL on COMPRESSION_RATIO_EXCEEDED even with arbitrary checkId
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P2 Regression — Canonical Archive Structural Reason Classification & Integrity > blocks and marks integrityResult FAIL on UNCOMPRESSED_SIZE_EXCEEDED
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P2 Regression — Canonical Archive Structural Reason Classification & Integrity > blocks and marks integrityResult FAIL on ENTRY_COUNT_EXCEEDED
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P2 Regression — Canonical Archive Structural Reason Classification & Integrity > blocks and marks integrityResult FAIL on NESTED_ARCHIVE_DEPTH_EXCEEDED
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > quarantines on SCANNER_LIMIT_EXCEEDED under default onSuspicious
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > blocks on SCANNER_LIMIT_EXCEEDED when policy.onSuspicious is BLOCK
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > evaluates P11 MAGIC_EXTENSION_MISMATCH as detector disagreement obeying policy
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > evaluates P11 MAGIC_MIME_MISMATCH and MIME_EXTENSION_MISMATCH as detector disagreements
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > evaluates TYPE_UNDETERMINED as detector disagreement yielding QUARANTINE
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P4 Regression — Scanner Failures and Precedence Invariants > produces ERROR on SCAN_TIMEOUT
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P4 Regression — Scanner Failures and Precedence Invariants > produces ERROR on SCANNER_UNAVAILABLE
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P4 Regression — Scanner Failures and Precedence Invariants > ensures CRITICAL threat overrides SCAN_TIMEOUT error -> BLOCK
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P5 Regression — policy.archiveAllowed Enforcement > blocks with ARCHIVE_FORBIDDEN when policy.archiveAllowed is false and archive finding is present
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P5 Regression — policy.archiveAllowed Enforcement > allows benign non-archive file when policy.archiveAllowed is false
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P5 Regression — policy.archiveAllowed Enforcement > allows clean archive when policy.archiveAllowed is true
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P5 Regression — policy.archiveAllowed Enforcement > allows clean archive when policy.archiveAllowed is unspecified (undefined)
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P6 Regression — policyResult Consistency > sets policyResult to FAIL when R4 emits BLOCK
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P6 Regression — policyResult Consistency > sets policyResult to FAIL when R5 triggers due to missing required CDR
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P6 Regression — policyResult Consistency > sets policyResult to FAIL when R6 triggers due to exceeded manual review threshold
 
  Test Files  1 passed (1)
-      Tests  42 passed (42)
-   Duration  310ms
+      Tests  65 passed (65)
+   Duration  324ms
 
 VERDICT: FULL PASS
-All 42 canonical test cases for Rules R1–R7 and R2/R3 precedence verified and passed.
+All 65 canonical test cases for Rules R1–R7, R2/R3 precedence, and P1–P6 regressions verified and passed.

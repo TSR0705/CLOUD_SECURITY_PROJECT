@@ -35,6 +35,10 @@ export type CanonicalReasonCode =
   | 'ALL_CHECKS_PASSED'
   | 'DETECTOR_DISAGREEMENT'
   | 'TYPE_UNDETERMINED'
+  | 'SCANNER_LIMIT_EXCEEDED'
+  | 'MAGIC_EXTENSION_MISMATCH'
+  | 'MAGIC_MIME_MISMATCH'
+  | 'MIME_EXTENSION_MISMATCH'
   // Malware / Pattern
   | 'MALWARE_DETECTED'
   // Archive (P16)
@@ -191,6 +195,38 @@ export const REASON_CODE_REGISTRY: Readonly<Record<CanonicalReasonCode, ReasonCo
     defaultConfidence: 'HIGH',
     description:
       'Artifact file type could not be definitively determined from header or structure.',
+  },
+  SCANNER_LIMIT_EXCEEDED: {
+    reasonCode: 'SCANNER_LIMIT_EXCEEDED',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description: 'Scanner resource limit exceeded (size, stream length, or recursion depth).',
+  },
+  MAGIC_EXTENSION_MISMATCH: {
+    reasonCode: 'MAGIC_EXTENSION_MISMATCH',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description: 'Detected file signature conflicts with filename extension.',
+  },
+  MAGIC_MIME_MISMATCH: {
+    reasonCode: 'MAGIC_MIME_MISMATCH',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description: 'Detected file signature conflicts with client-declared MIME type.',
+  },
+  MIME_EXTENSION_MISMATCH: {
+    reasonCode: 'MIME_EXTENSION_MISMATCH',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description: 'Client-declared MIME type conflicts with filename extension.',
   },
   MALWARE_DETECTED: {
     reasonCode: 'MALWARE_DETECTED',

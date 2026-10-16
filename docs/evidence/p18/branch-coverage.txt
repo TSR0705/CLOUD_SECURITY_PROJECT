@@ -8,8 +8,8 @@ npx vitest run tests/unit/decision-engine/ tests/integration/decision/ --coverag
 
 Test Results:
   Test Files  6 passed (6)
-       Tests  75 passed (75)
-    Duration  2.42s
+       Tests  99 passed (99)
+    Duration  2.95s
 
 % Coverage report from v8
 -------------------------|---------|----------|---------|---------|-------------------

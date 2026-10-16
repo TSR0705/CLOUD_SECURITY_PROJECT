@@ -1078,4 +1078,629 @@ describe('Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P1
       expect(idxA).toBeLessThan(idxZ);
     });
   });
+
+  describe('P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention', () => {
+    it('does not bypass R4 when a FLAG disagreement is present alongside a MEDIUM failure', () => {
+      const policy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        disagreementAction: 'FLAG',
+        onSuspicious: 'QUARANTINE',
+      };
+
+      const disagreementFinding: FindingInput = {
+        checkId: 'scanner.detector',
+        engine: 'file-type',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'DETECTOR_DISAGREEMENT',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const mediumFinding: FindingInput = {
+        checkId: 'scanner.ooxml.relationship',
+        engine: 'ooxml',
+        outcome: 'FAIL',
+        reasonCode: 'OOXML_EXTERNAL_RELATIONSHIP',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      // Both findings present: even though disagreement is sorted first (confidence CONFIRMED vs HIGH),
+      // the FLAG setting only flags the disagreement, and OOXML_EXTERNAL_RELATIONSHIP must trigger QUARANTINE!
+      const res = decide(policy, validIdentity, [
+        ...cleanFindings,
+        disagreementFinding,
+        mediumFinding,
+      ]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R4');
+      expect(res.primaryReason).toBe('OOXML_EXTERNAL_RELATIONSHIP');
+    });
+
+    it('does not bypass R4 when a FLAG disagreement is present alongside another SUSPICIOUS finding', () => {
+      const policy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        disagreementAction: 'FLAG',
+        onSuspicious: 'QUARANTINE',
+      };
+
+      const disagreementFinding: FindingInput = {
+        checkId: 'scanner.detector',
+        engine: 'file-type',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'DETECTOR_DISAGREEMENT',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const suspiciousImageFinding: FindingInput = {
+        checkId: 'scanner.image.trailing',
+        engine: 'sharp',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'IMAGE_TRAILING_DATA_DETECTED',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(policy, validIdentity, [
+        ...cleanFindings,
+        disagreementFinding,
+        suspiciousImageFinding,
+      ]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R4');
+      expect(res.primaryReason).toBe('IMAGE_TRAILING_DATA_DETECTED');
+    });
+
+    it('evaluates multiple disagreements and multiple medium findings deterministically', () => {
+      const policy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        disagreementAction: 'FLAG',
+        onSuspicious: 'QUARANTINE',
+      };
+
+      const f1: FindingInput = {
+        checkId: 'scanner.detector',
+        engine: 'file-type',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'DETECTOR_DISAGREEMENT',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const f2: FindingInput = {
+        checkId: 'scanner.type',
+        engine: 'libmagic',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'TYPE_UNDETERMINED',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const f3: FindingInput = {
+        checkId: 'scanner.ooxml.relationship',
+        engine: 'ooxml',
+        outcome: 'FAIL',
+        reasonCode: 'OOXML_EXTERNAL_RELATIONSHIP',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const f4: FindingInput = {
+        checkId: 'scanner.image.trailing',
+        engine: 'sharp',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'IMAGE_TRAILING_DATA_DETECTED',
+        severity: 'MEDIUM',
+        confidence: 'MEDIUM',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res1 = decide(policy, validIdentity, [...cleanFindings, f1, f2, f3, f4]);
+      const res2 = decide(policy, validIdentity, [...cleanFindings, f4, f3, f2, f1]);
+
+      expect(res1.decision).toBe('QUARANTINE');
+      expect(res1.primaryReason).toBe('OOXML_EXTERNAL_RELATIONSHIP');
+      expect(res2.decision).toBe('QUARANTINE');
+      expect(res2.primaryReason).toBe('OOXML_EXTERNAL_RELATIONSHIP');
+    });
+
+    it('elevates decision to BLOCK when disagreementAction is BLOCK even if non-disagreement candidate is ranked first', () => {
+      const policy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        disagreementAction: 'BLOCK',
+        onSuspicious: 'QUARANTINE', // non-disagreements quarantine, but disagreement forces BLOCK
+      };
+
+      // Non-disagreement candidate with higher confidence (CONFIRMED)
+      const mediumFinding: FindingInput = {
+        checkId: 'scanner.ooxml.relationship',
+        engine: 'ooxml',
+        outcome: 'FAIL',
+        reasonCode: 'OOXML_EXTERNAL_RELATIONSHIP',
+        severity: 'MEDIUM',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      // Disagreement candidate with lower confidence (HIGH)
+      const disagreementFinding: FindingInput = {
+        checkId: 'scanner.detector',
+        engine: 'file-type',
+        outcome: 'WARN',
+        reasonCode: 'DETECTOR_DISAGREEMENT',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(policy, validIdentity, [
+        ...cleanFindings,
+        mediumFinding,
+        disagreementFinding,
+      ]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('DETECTOR_DISAGREEMENT');
+      expect(res.rule).toBe('R4');
+      expect(res.policyResult).toBe('FAIL');
+    });
+  });
+
+  describe('P2 Regression — Canonical Archive Structural Reason Classification & Integrity', () => {
+    it('blocks and marks integrityResult FAIL on COMPRESSION_RATIO_EXCEEDED even with arbitrary checkId', () => {
+      const finding: FindingInput = {
+        checkId: 'archive.ratio',
+        engine: 'custom-unzipper',
+        outcome: 'FAIL',
+        reasonCode: 'COMPRESSION_RATIO_EXCEEDED',
+        severity: 'HIGH',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('COMPRESSION_RATIO_EXCEEDED');
+      expect(res.rule).toBe('R3');
+      expect(res.integrityResult).toBe('FAIL');
+    });
+
+    it('blocks and marks integrityResult FAIL on UNCOMPRESSED_SIZE_EXCEEDED', () => {
+      const finding: FindingInput = {
+        checkId: 'archive.size',
+        engine: 'yauzl',
+        outcome: 'FAIL',
+        reasonCode: 'UNCOMPRESSED_SIZE_EXCEEDED',
+        severity: 'HIGH',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('UNCOMPRESSED_SIZE_EXCEEDED');
+      expect(res.integrityResult).toBe('FAIL');
+    });
+
+    it('blocks and marks integrityResult FAIL on ENTRY_COUNT_EXCEEDED', () => {
+      const finding: FindingInput = {
+        checkId: 'archive.entries',
+        engine: 'yauzl',
+        outcome: 'FAIL',
+        reasonCode: 'ENTRY_COUNT_EXCEEDED',
+        severity: 'HIGH',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('ENTRY_COUNT_EXCEEDED');
+      expect(res.integrityResult).toBe('FAIL');
+    });
+
+    it('blocks and marks integrityResult FAIL on NESTED_ARCHIVE_DEPTH_EXCEEDED', () => {
+      const finding: FindingInput = {
+        checkId: 'archive.depth',
+        engine: 'yauzl',
+        outcome: 'FAIL',
+        reasonCode: 'NESTED_ARCHIVE_DEPTH_EXCEEDED',
+        severity: 'HIGH',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('NESTED_ARCHIVE_DEPTH_EXCEEDED');
+      expect(res.integrityResult).toBe('FAIL');
+    });
+  });
+
+  describe('P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11)', () => {
+    it('quarantines on SCANNER_LIMIT_EXCEEDED under default onSuspicious', () => {
+      const finding: FindingInput = {
+        checkId: 'scanner.clamav',
+        engine: 'clamav',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'SCANNER_LIMIT_EXCEEDED',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.primaryReason).toBe('SCANNER_LIMIT_EXCEEDED');
+      expect(res.rule).toBe('R4');
+    });
+
+    it('blocks on SCANNER_LIMIT_EXCEEDED when policy.onSuspicious is BLOCK', () => {
+      const policy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        onSuspicious: 'BLOCK',
+      };
+
+      const finding: FindingInput = {
+        checkId: 'scanner.clamav',
+        engine: 'clamav',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'SCANNER_LIMIT_EXCEEDED',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(policy, validIdentity, [...cleanFindings, finding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('SCANNER_LIMIT_EXCEEDED');
+      expect(res.policyResult).toBe('FAIL');
+    });
+
+    it('evaluates P11 MAGIC_EXTENSION_MISMATCH as detector disagreement obeying policy', () => {
+      const finding: FindingInput = {
+        checkId: 'validator.type',
+        engine: 'consistency-validator',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'MAGIC_EXTENSION_MISMATCH',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const quarantineRes = decide(defaultPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(quarantineRes.decision).toBe('QUARANTINE');
+      expect(quarantineRes.primaryReason).toBe('MAGIC_EXTENSION_MISMATCH');
+
+      const blockPolicy: DecisionPolicyInput = { ...defaultPolicy, disagreementAction: 'BLOCK' };
+      const blockRes = decide(blockPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(blockRes.decision).toBe('BLOCK');
+
+      const flagPolicy: DecisionPolicyInput = { ...defaultPolicy, disagreementAction: 'FLAG' };
+      const flagRes = decide(flagPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(flagRes.decision).toBe('ALLOW'); // skips R4, contributes to risk score
+    });
+
+    it('evaluates P11 MAGIC_MIME_MISMATCH and MIME_EXTENSION_MISMATCH as detector disagreements', () => {
+      const findingMime: FindingInput = {
+        checkId: 'validator.type',
+        engine: 'consistency-validator',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'MAGIC_MIME_MISMATCH',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const resMime = decide(defaultPolicy, validIdentity, [...cleanFindings, findingMime]);
+      expect(resMime.decision).toBe('QUARANTINE');
+      expect(resMime.primaryReason).toBe('MAGIC_MIME_MISMATCH');
+
+      const findingExt: FindingInput = {
+        checkId: 'validator.type',
+        engine: 'consistency-validator',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'MIME_EXTENSION_MISMATCH',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const resExt = decide(defaultPolicy, validIdentity, [...cleanFindings, findingExt]);
+      expect(resExt.decision).toBe('QUARANTINE');
+      expect(resExt.primaryReason).toBe('MIME_EXTENSION_MISMATCH');
+    });
+
+    it('evaluates TYPE_UNDETERMINED as detector disagreement yielding QUARANTINE', () => {
+      const finding: FindingInput = {
+        checkId: 'validator.magic',
+        engine: 'file-type',
+        outcome: 'SUSPICIOUS',
+        reasonCode: 'TYPE_UNDETERMINED',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, finding]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.primaryReason).toBe('TYPE_UNDETERMINED');
+      expect(res.rule).toBe('R4');
+    });
+  });
+
+  describe('P4 Regression — Scanner Failures and Precedence Invariants', () => {
+    it('produces ERROR on SCAN_TIMEOUT', () => {
+      const finding: FindingInput = {
+        checkId: 'scanner.clamav',
+        engine: 'clamav',
+        outcome: 'ERROR',
+        reasonCode: 'SCAN_TIMEOUT',
+        severity: 'ERROR',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [finding, cleanFindings[1]!]);
+      expect(res.decision).toBe('ERROR');
+      expect(res.primaryReason).toBe('SCAN_TIMEOUT');
+      expect(res.rule).toBe('R2');
+      expect(res.policyResult).toBe('FAIL');
+    });
+
+    it('produces ERROR on SCANNER_UNAVAILABLE', () => {
+      const finding: FindingInput = {
+        checkId: 'scanner.clamav',
+        engine: 'clamav',
+        outcome: 'ERROR',
+        reasonCode: 'SCANNER_UNAVAILABLE',
+        severity: 'ERROR',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [finding, cleanFindings[1]!]);
+      expect(res.decision).toBe('ERROR');
+      expect(res.primaryReason).toBe('SCANNER_UNAVAILABLE');
+      expect(res.rule).toBe('R2');
+    });
+
+    it('ensures CRITICAL threat overrides SCAN_TIMEOUT error -> BLOCK', () => {
+      const timeoutFinding: FindingInput = {
+        checkId: 'scanner.clamav',
+        engine: 'clamav',
+        outcome: 'ERROR',
+        reasonCode: 'SCAN_TIMEOUT',
+        severity: 'ERROR',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const malwareFinding: FindingInput = {
+        checkId: 'scanner.yara',
+        engine: 'yara-x',
+        outcome: 'FAIL',
+        reasonCode: 'MALWARE_DETECTED',
+        severity: 'CRITICAL',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [timeoutFinding, malwareFinding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('MALWARE_DETECTED');
+      expect(res.rule).toBe('R3');
+    });
+  });
+
+  describe('P5 Regression — policy.archiveAllowed Enforcement', () => {
+    it('blocks with ARCHIVE_FORBIDDEN when policy.archiveAllowed is false and archive finding is present', () => {
+      const noArchivePolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        archiveAllowed: false,
+      };
+
+      const archiveFinding: FindingInput = {
+        checkId: 'scanner.archive',
+        engine: 'yauzl',
+        outcome: 'PASS',
+        reasonCode: 'CLEAN',
+        severity: 'INFO',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(noArchivePolicy, validIdentity, [...cleanFindings, archiveFinding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.primaryReason).toBe('ARCHIVE_FORBIDDEN');
+      expect(res.rule).toBe('R3');
+      expect(res.integrityResult).toBe('FAIL');
+      expect(res.policyResult).toBe('FAIL');
+    });
+
+    it('allows benign non-archive file when policy.archiveAllowed is false', () => {
+      const noArchivePolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        archiveAllowed: false,
+      };
+
+      const res = decide(noArchivePolicy, validIdentity, cleanFindings);
+      expect(res.decision).toBe('ALLOW');
+      expect(res.rule).toBe('R7');
+      expect(res.primaryReason).toBe('ALL_CHECKS_PASSED');
+      expect(res.policyResult).toBe('PASS');
+    });
+
+    it('allows clean archive when policy.archiveAllowed is true', () => {
+      const archivePolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        archiveAllowed: true,
+      };
+
+      const archiveFinding: FindingInput = {
+        checkId: 'scanner.archive',
+        engine: 'yauzl',
+        outcome: 'PASS',
+        reasonCode: 'CLEAN',
+        severity: 'INFO',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(archivePolicy, validIdentity, [...cleanFindings, archiveFinding]);
+      expect(res.decision).toBe('ALLOW');
+      expect(res.rule).toBe('R7');
+      expect(res.policyResult).toBe('PASS');
+    });
+
+    it('allows clean archive when policy.archiveAllowed is unspecified (undefined)', () => {
+      const archiveFinding: FindingInput = {
+        checkId: 'scanner.archive',
+        engine: 'yauzl',
+        outcome: 'PASS',
+        reasonCode: 'CLEAN',
+        severity: 'INFO',
+        confidence: 'CONFIRMED',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(defaultPolicy, validIdentity, [...cleanFindings, archiveFinding]);
+      expect(res.decision).toBe('ALLOW');
+      expect(res.rule).toBe('R7');
+    });
+  });
+
+  describe('P6 Regression — policyResult Consistency', () => {
+    it('sets policyResult to FAIL when R4 emits BLOCK', () => {
+      const blockPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        onSuspicious: 'BLOCK',
+      };
+
+      const mediumFinding: FindingInput = {
+        checkId: 'scanner.ooxml.relationship',
+        engine: 'ooxml',
+        outcome: 'FAIL',
+        reasonCode: 'OOXML_EXTERNAL_RELATIONSHIP',
+        severity: 'MEDIUM',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(blockPolicy, validIdentity, [...cleanFindings, mediumFinding]);
+      expect(res.decision).toBe('BLOCK');
+      expect(res.policyResult).toBe('FAIL');
+    });
+
+    it('sets policyResult to FAIL when R5 triggers due to missing required CDR', () => {
+      const cdrPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        cdrRequired: true,
+      };
+
+      const res = decide(cdrPolicy, validIdentity, cleanFindings);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R5');
+      expect(res.policyResult).toBe('FAIL');
+    });
+
+    it('sets policyResult to FAIL when R6 triggers due to exceeded manual review threshold', () => {
+      const thresholdPolicy: DecisionPolicyInput = {
+        ...defaultPolicy,
+        manualReviewThreshold: 20,
+      };
+
+      const low1: FindingInput = {
+        checkId: 'scanner.low1',
+        engine: 'scanner',
+        outcome: 'FAIL',
+        reasonCode: 'LOW_ISSUE_1',
+        severity: 'LOW',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const low2: FindingInput = {
+        checkId: 'scanner.low2',
+        engine: 'scanner',
+        outcome: 'FAIL',
+        reasonCode: 'LOW_ISSUE_2',
+        severity: 'LOW',
+        confidence: 'HIGH',
+        scannedStorageVersionId: 'v-1001',
+        scannedSha256: dummySha,
+        scannedSizeBytes: 1024,
+      };
+
+      const res = decide(thresholdPolicy, validIdentity, [...cleanFindings, low1, low2]);
+      expect(res.decision).toBe('QUARANTINE');
+      expect(res.rule).toBe('R6');
+      expect(res.policyResult).toBe('FAIL');
+    });
+  });
 });

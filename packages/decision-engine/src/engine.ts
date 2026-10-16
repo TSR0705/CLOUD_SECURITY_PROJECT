@@ -52,9 +52,27 @@ const ARCHIVE_STRUCTURAL_REASONS = new Set([
   'SIZE_MISMATCH',
   'TIMEOUT_EXCEEDED',
   'MEMORY_BUDGET_EXCEEDED',
+  'COMPRESSION_RATIO_EXCEEDED',
+  'UNCOMPRESSED_SIZE_EXCEEDED',
+  'ENTRY_COUNT_EXCEEDED',
+  'NESTED_ARCHIVE_DEPTH_EXCEEDED',
 ]);
 
-const DISAGREEMENT_REASONS = new Set(['DETECTOR_DISAGREEMENT', 'TYPE_UNDETERMINED']);
+const DISAGREEMENT_REASONS = new Set([
+  'DETECTOR_DISAGREEMENT',
+  'TYPE_UNDETERMINED',
+  'MAGIC_EXTENSION_MISMATCH',
+  'MAGIC_MIME_MISMATCH',
+  'MIME_EXTENSION_MISMATCH',
+]);
+
+function isArchiveCheckOrReason(reasonCode: string, checkId: string): boolean {
+  return (
+    ARCHIVE_STRUCTURAL_REASONS.has(reasonCode) ||
+    checkId.startsWith('scanner.archive') ||
+    checkId.startsWith('archive.')
+  );
+}
 
 interface NormalizedIdentity {
   bucket: string;
@@ -456,6 +474,30 @@ export function decide(
 
   const r2Matches = r2MissingCheck !== null || requiredCheckErrors.length > 0;
 
+  // Check for forbidden archives when policy.archiveAllowed === false
+  if (policy.archiveAllowed === false) {
+    const forbiddenArchiveFinding = normalizedFindings.find(
+      (f) =>
+        f.reasonCode !== 'NOT_APPLICABLE' &&
+        f.outcome !== 'SKIPPED' &&
+        isArchiveCheckOrReason(f.reasonCode, f.checkId),
+    );
+    if (forbiddenArchiveFinding) {
+      return buildResult(
+        'BLOCK',
+        'R3',
+        'ARCHIVE_FORBIDDEN',
+        'HIGH',
+        'CONFIRMED',
+        100,
+        'FAIL',
+        'FAIL',
+        'FAIL',
+        ['R1: PASS', 'R3: TRIGGERED (ARCHIVE_FORBIDDEN: policy.archiveAllowed is false)'],
+      );
+    }
+  }
+
   // 3. R3 Threat Findings check (Any finding with outcome === 'FAIL' and severity CRITICAL or HIGH)
   // Evaluates malware, exploits, archive bombs, zip slips, embedded executables, active content, etc.
   const threatFindings = sortedFindings.filter(
@@ -471,9 +513,10 @@ export function decide(
   // =========================================================================
   if (r3Matches) {
     const primaryThreat = threatFindings[0]!;
-    const isArchiveStructural =
-      ARCHIVE_STRUCTURAL_REASONS.has(primaryThreat.reasonCode) ||
-      primaryThreat.checkId.startsWith('scanner.archive');
+    const isArchiveStructural = isArchiveCheckOrReason(
+      primaryThreat.reasonCode,
+      primaryThreat.checkId,
+    );
 
     return buildResult(
       'BLOCK',
@@ -512,6 +555,7 @@ export function decide(
   // A finding with outcome FAIL and severity MEDIUM, or any finding with outcome SUSPICIOUS,
   // or WARN with severity MEDIUM (e.g. detector disagreements).
   // Follows policy.onSuspicious (default QUARANTINE, or BLOCK if configured).
+  // Candidates exclude disagreement findings configured as 'FLAG' (which only contribute to risk score).
   // =========================================================================
   const mediumOrSuspiciousFindings = sortedFindings.filter(
     (f) =>
@@ -520,38 +564,53 @@ export function decide(
       ((f.outcome as string) === 'WARN' && f.severity === 'MEDIUM'),
   );
 
-  if (mediumOrSuspiciousFindings.length > 0) {
-    const primaryFinding = mediumOrSuspiciousFindings[0]!;
-    const isDisagreement = DISAGREEMENT_REASONS.has(primaryFinding.reasonCode);
-    const disagreementAction = policy.disagreementAction;
+  const disagreementAction = policy.disagreementAction;
 
-    if (isDisagreement && disagreementAction === 'FLAG') {
-      // Detector disagreement configured to FLAG: skip R4 terminal decision,
-      // letting finding contribute to risk score in R6/R7.
-    } else {
-      let action: 'QUARANTINE' | 'BLOCK' = policy.onSuspicious ?? 'QUARANTINE';
-      if (isDisagreement && disagreementAction === 'BLOCK') {
-        action = 'BLOCK';
-      }
+  // Candidates for terminal R4 action:
+  // Disagreement findings skip terminal R4 action only when policy.disagreementAction is 'FLAG'.
+  const r4Candidates = mediumOrSuspiciousFindings.filter((f) => {
+    const isDisagreement = DISAGREEMENT_REASONS.has(f.reasonCode);
+    return !(isDisagreement && disagreementAction === 'FLAG');
+  });
 
-      const score = Math.max(25, calculateRiskScore(rawFindings));
-      const isArchiveStructural =
-        ARCHIVE_STRUCTURAL_REASONS.has(primaryFinding.reasonCode) ||
-        primaryFinding.checkId.startsWith('scanner.archive');
+  if (r4Candidates.length > 0) {
+    // Check if any candidate is a disagreement when policy configured disagreementAction === 'BLOCK'
+    const hasBlockingDisagreement = r4Candidates.some(
+      (f) => DISAGREEMENT_REASONS.has(f.reasonCode) && disagreementAction === 'BLOCK',
+    );
 
-      return buildResult(
-        action,
-        'R4',
-        primaryFinding.reasonCode,
-        primaryFinding.severity,
-        primaryFinding.confidence,
-        score,
-        'PASS',
-        'SUSPICIOUS',
-        isArchiveStructural ? 'FAIL' : 'PASS',
-        ['R1: PASS', 'R2: PASS', 'R3: PASS', `R4: TRIGGERED (${primaryFinding.reasonCode})`],
-      );
+    let action: 'QUARANTINE' | 'BLOCK' = policy.onSuspicious ?? 'QUARANTINE';
+    if (hasBlockingDisagreement) {
+      action = 'BLOCK';
     }
+
+    const primaryFinding =
+      hasBlockingDisagreement &&
+      action === 'BLOCK' &&
+      !DISAGREEMENT_REASONS.has(r4Candidates[0]!.reasonCode) &&
+      policy.onSuspicious !== 'BLOCK'
+        ? r4Candidates.find((f) => DISAGREEMENT_REASONS.has(f.reasonCode))!
+        : r4Candidates[0]!;
+
+    const score = Math.max(25, calculateRiskScore(rawFindings));
+    const isArchiveStructural = isArchiveCheckOrReason(
+      primaryFinding.reasonCode,
+      primaryFinding.checkId,
+    );
+    const policyResult: 'PASS' | 'FAIL' = action === 'BLOCK' ? 'FAIL' : 'PASS';
+
+    return buildResult(
+      action,
+      'R4',
+      primaryFinding.reasonCode,
+      primaryFinding.severity,
+      primaryFinding.confidence,
+      score,
+      policyResult,
+      'SUSPICIOUS',
+      isArchiveStructural ? 'FAIL' : 'PASS',
+      ['R1: PASS', 'R2: PASS', 'R3: PASS', `R4: TRIGGERED (${primaryFinding.reasonCode})`],
+    );
   }
 
   // =========================================================================
@@ -575,7 +634,7 @@ export function decide(
         'MEDIUM',
         'CONFIRMED',
         score,
-        'PASS',
+        'FAIL',
         'SUSPICIOUS',
         'PASS',
         ['R1: PASS', 'R2: PASS', 'R3: PASS', 'R4: PASS', 'R5: TRIGGERED (CDR_REQUIRED_NOT_DONE)'],
@@ -599,7 +658,7 @@ export function decide(
       'MEDIUM',
       'HIGH',
       computedRiskScore,
-      'PASS',
+      'FAIL',
       'SUSPICIOUS',
       'PASS',
       [
