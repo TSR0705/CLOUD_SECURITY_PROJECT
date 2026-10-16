@@ -1,0 +1,64 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P18 CANONICAL E2E EVIDENCE
+POLICY-03: COMPLETE DETERMINISTIC DECISION & HUMAN REVIEW LIFECYCLE
+================================================================================
+
+1. CANONICAL POLICY-03 TEST FLOW
+--------------------------------------------------------------------------------
+This integration test proves the full end-to-end lifecycle specified in P18:
+  1. Policy Setup:
+     Application policy configured with required checks (clamav.instream, yara.rules)
+     and manualReviewThreshold = 20.
+  2. Artifact Identity Binding:
+     Immutable artifact identity created with bucket, objectKey, storageVersionId,
+     SHA-256 digest, and byte size.
+  3. Findings Model:
+     ClamAV: PASS (CLEAN)
+     YARA: PASS (CLEAN)
+     Detector Disagreement: SUSPICIOUS (DETECTOR_DISAGREEMENT) with risk score 25.
+  4. Deterministic Decision Engine (decide()):
+     Evaluates findings. Rule R4 triggers:
+     decision: 'QUARANTINE'
+     rule: 'R4'
+     primaryReason: 'DETECTOR_DISAGREEMENT'
+     riskScore: 25
+     record schema: 'sug.decision/v1'
+  5. Persistence (persistDecision()):
+     Persists decision row into PostgreSQL `security_decisions` relation with
+     SHA-256 binary digest and JSONB explainable decision record.
+  6. Edge API Retrieval (GET /api/v1/security-decisions/:id):
+     Authorized API key retrieves the decision with tenant boundary enforcement.
+     Returns HTTP 200 with sanitized JSON payload matching OpenAPI contract.
+  7. Human Review Override (POST /api/v1/security-decisions/:id/review):
+     SecOps analyst submits an override request with valid JWT and justification:
+       "Reviewed by SecOps analyst: Verified false positive on type detector mismatch; safe for ingestion"
+     Engine enforces fail-closed review invariants.
+     Atomically inserts new superseding decision row into `security_decisions`:
+       decision: 'ALLOW'
+       rule: 'HUMAN_REVIEW'
+       primaryReason: 'HUMAN_REVIEW_ALLOW'
+       supersedes_id: <original_decision_id>
+       decided_by: 'human:analyst@corp.internal'
+     Updates `files` status to 'SCANNED'.
+     Emits tamper-evident audit event via `audit_append()` function.
+  8. Post-Review Verification:
+     Retrieves new decision via GET endpoint and confirms supersedesId links back
+     to original quarantined decision.
+
+2. TEST SUITE EXECUTION (tests/integration/decision/policy-03.test.ts)
+--------------------------------------------------------------------------------
+Command:
+pnpm vitest run tests/integration/decision/policy-03.test.ts --reporter=verbose
+
+Output:
+ RUN  v5.0.1 C:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT
+
+ ✓ tests/integration/decision/policy-03.test.ts > policy-03 — End-to-End Deterministic Decision & Human Review Lifecycle > policy-03: Executes upload -> decide() -> persistence -> GET API -> human review override -> superseding ALLOW 98ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Duration  831ms
+
+VERDICT: PASS
+The canonical policy-03 DoD test passes completely.
+All invariants for explainability, persistence, tenant isolation, and human review overrides are verified.

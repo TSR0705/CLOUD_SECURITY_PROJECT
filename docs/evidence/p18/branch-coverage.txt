@@ -1,0 +1,45 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P18 BRANCH COVERAGE EVIDENCE
+100% BRANCH COVERAGE ON PACKAGES/DECISION-ENGINE
+================================================================================
+
+Command:
+pnpm vitest run tests/unit/decision-engine/ --coverage
+
+Output:
+ RUN  v5.0.1 C:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT
+      Coverage enabled with v8
+
+ ✓ tests/unit/decision-engine/property.test.ts (1 test) 216ms
+ ✓ tests/unit/decision-engine/rules.test.ts (23 tests) 14ms
+ ✓ tests/unit/decision-engine/edge-cases.test.ts (19 tests) 15ms
+ ✓ tests/unit/decision-engine/review.test.ts (9 tests) 4ms
+ ✓ tests/unit/decision-engine/persistence.test.ts (3 tests) 4ms
+
+ Test Files  5 passed (5)
+      Tests  55 passed (55)
+   Duration  1.36s
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+ ...ion-engine/src |     100 |      100 |     100 |     100 |                   
+  engine.ts        |     100 |      100 |     100 |     100 |                   
+  index.ts         |     100 |      100 |     100 |     100 |                   
+  mapping.ts       |     100 |      100 |     100 |     100 |                   
+  persistence.ts   |     100 |      100 |     100 |     100 |                   
+  review.ts        |     100 |      100 |     100 |     100 |                   
+  risk.ts          |     100 |      100 |     100 |     100 |                   
+  types.ts         |     100 |      100 |     100 |     100 |                   
+-------------------|---------|----------|---------|---------|-------------------
+
+SUMMARY OF METRICS:
+  Package: @sug/decision-engine (packages/decision-engine/src)
+  Statements: 100.00% (All statements covered)
+  Branches:   100.00% (All branches covered)
+  Functions:  100.00% (All functions covered)
+  Lines:      100.00% (All lines covered)
+
+VERDICT: PASS
+100% branch and statement coverage requirement for P18 decision-engine is fully satisfied.

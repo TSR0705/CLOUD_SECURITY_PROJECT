@@ -38,3 +38,4 @@ export * from './auth/jwt.js';
 export * from './auth/user-service.js';
 export * from './auth/rbac.js';
 export * from './routes/user-auth.js';
+export * from './routes/security-decisions.js';

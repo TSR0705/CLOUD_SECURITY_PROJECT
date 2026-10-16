@@ -1,0 +1,61 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P18 API EVIDENCE
+SECURITY DECISIONS & HUMAN REVIEW ENDPOINTS INTEGRATION EVIDENCE
+================================================================================
+
+1. ROUTE SPECIFICATION & SECURITY CONTROLS
+--------------------------------------------------------------------------------
+Endpoints Implemented in services/api (services/api/src/routes/security-decisions.ts):
+  - GET /api/v1/security-decisions/:id (and /security-decisions/:id)
+    - Authentication:
+      - API Key: Scoped and tenant-isolated to application_id. Cross-tenant access
+        fails with HTTP 403 Forbidden.
+      - User JWT: Allowed for admin, analyst, and auditor roles.
+    - Response:
+      - HTTP 200 with sanitized explainable decision record (sug.decision/v1),
+        bound artifact identity, risk score, and rule trace.
+      - Never leaks database internal secrets or tokens.
+  - POST /api/v1/security-decisions/:id/review (and /security-decisions/:id/review)
+    - Role-Guarded Access:
+      - API keys: Rejected with HTTP 403 (Human review requires human identity).
+      - Auditor JWT: Rejected with HTTP 403 (Auditors are read-only).
+      - Analyst / Admin JWT: Allowed.
+    - Fail-Closed Business Invariants:
+      - Justification minimum length >= 10 characters.
+      - Cannot override an ERROR decision or missing required check to ALLOW (HTTP 400).
+      - Cannot override confirmed CRITICAL or HIGH threat BLOCKs
+        (MALWARE_DETECTED, ARCHIVE_BOMB_DETECTED, ZIP_SLIP_DETECTED, etc.) to ALLOW (HTTP 400).
+    - State Transitions & Audit:
+      - Inserts new superseding decision row into PostgreSQL `security_decisions`
+        with supersedes_id bound to prior decision.
+      - Updates `files` status atomically (ALLOW -> 'SCANNED', BLOCK -> 'BLOCKED').
+      - Records tamper-evident audit event via `audit_append()`.
+      - Returns HTTP 201 Created with newly created decision record.
+
+2. TEST SUITE EXECUTION (tests/integration/api/security-decisions.test.ts)
+--------------------------------------------------------------------------------
+Command:
+pnpm vitest run tests/integration/api/security-decisions.test.ts --reporter=verbose
+
+Output:
+ RUN  v5.0.1 C:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT
+
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > GET /api/v1/security-decisions/:id > rejects unauthenticated requests with 401 Problem Details 189ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > GET /api/v1/security-decisions/:id > rejects invalid UUID parameter with 400 Problem Details 45ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > GET /api/v1/security-decisions/:id > returns 404 Problem Details when decision does not exist 35ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > GET /api/v1/security-decisions/:id > enforces tenant application boundary (returns 403 when App B accesses App A decision) 34ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > GET /api/v1/security-decisions/:id > returns 200 with complete decision details for authorized API key matching application 32ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > GET /api/v1/security-decisions/:id > allows access to authorized user JWT (auditor role) 51ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > POST /api/v1/security-decisions/:id/review > rejects API key callers with 403 Forbidden (human review requires user token) 25ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > POST /api/v1/security-decisions/:id/review > rejects auditor user role with 403 Forbidden (requires analyst or admin) 24ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > POST /api/v1/security-decisions/:id/review > rejects short justifications (< 10 chars) with 400 Problem Details 29ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > POST /api/v1/security-decisions/:id/review > FAIL-CLOSED: Rejects attempting to override ERROR decision to ALLOW 31ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > POST /api/v1/security-decisions/:id/review > FAIL-CLOSED: Rejects attempting to override critical threat BLOCK to ALLOW 25ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > POST /api/v1/security-decisions/:id/review > succeeds when analyst overrides QUARANTINE to ALLOW with valid justification 31ms
+ ✓ tests/integration/api/security-decisions.test.ts > API Integration — Security Decisions & Human Review Endpoints (Phase P18) > POST /api/v1/security-decisions/:id/review > succeeds when admin overrides QUARANTINE to BLOCK with valid justification 30ms
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+
+VERDICT: PASS
+All 13 security decision API integration tests verified and passed.

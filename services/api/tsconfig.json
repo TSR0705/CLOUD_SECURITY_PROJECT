@@ -15,6 +15,9 @@
     },
     {
       "path": "../../packages/policy-engine"
+    },
+    {
+      "path": "../../packages/decision-engine"
     }
   ]
 }
