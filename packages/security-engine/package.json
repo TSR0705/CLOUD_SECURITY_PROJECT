@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@sug/shared": "workspace:*"
+    "@sug/shared": "workspace:*",
+    "file-type": "^22.1.1"
   }
 }

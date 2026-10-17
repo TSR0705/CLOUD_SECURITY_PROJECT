@@ -24,6 +24,10 @@ export default defineConfig({
     clearMocks: true,
     environment: 'node',
     fileParallelism: false,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+    },
     include: ['tests/**/*.test.ts', 'packages/**/*.test.ts', 'services/**/*.test.ts'],
   },
 });
