@@ -9,3 +9,23 @@
 /path/.env:generic-api-key:2
 .env:generic-api-key:2
 
+# Test fixtures in P6 commit tests/unit/api/auth.test.ts
+5367952387baca5e38f00c011d1d5efdeefd7110:tests/unit/api/auth.test.ts:generic-api-key:94
+5367952387baca5e38f00c011d1d5efdeefd7110:tests/unit/api/auth.test.ts:generic-api-key:104
+/path/tests/unit/api/auth.test.ts:generic-api-key:94
+/path/tests/unit/api/auth.test.ts:generic-api-key:104
+tests/unit/api/auth.test.ts:generic-api-key:94
+tests/unit/api/auth.test.ts:generic-api-key:104
+
+# Test fixtures in P7 commit tests/unit/api/upload-auth.test.ts
+ffcd9da9836926b3bc8d23ceca52128fef2e8d16:tests/unit/api/upload-auth.test.ts:generic-api-key:374
+
+# Local development test secrets (.gitignored)
+/path/secrets/checkpoint_private_key:private-key:1
+/path/secrets/checkpoint_private_key.pem:private-key:1
+/path/secrets/jwt_private_key:private-key:1
+/path/secrets/jwt_private_key.pem:private-key:1
+secrets/checkpoint_private_key:private-key:1
+secrets/checkpoint_private_key.pem:private-key:1
+secrets/jwt_private_key:private-key:1
+secrets/jwt_private_key.pem:private-key:1

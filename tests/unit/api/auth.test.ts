@@ -14,7 +14,7 @@ import type { ApiKeyDatabase } from '../../../services/api/src/auth/types.js';
 import type { Config } from '@sug/shared/config';
 
 describe('Phase P6: Application API Keys (Unit Tests)', () => {
-  const TEST_PEPPER = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const TEST_PEPPER = crypto.randomBytes(32).toString('hex');
 
   describe('1. Cryptographic Key Generation & Format', () => {
     it('generates a key with the expected structure and exact lengths', () => {
@@ -91,7 +91,7 @@ describe('Phase P6: Application API Keys (Unit Tests)', () => {
 
   describe('2. HMAC-SHA-256 & Peppered Storage', () => {
     it('computes deterministic 32-byte HMAC digest given same secret and pepper', () => {
-      const secret = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      const secret = crypto.randomBytes(32).toString('hex');
       const hmac1 = computeKeyHmac(secret, TEST_PEPPER);
       const hmac2 = computeKeyHmac(secret, TEST_PEPPER);
 
@@ -101,8 +101,8 @@ describe('Phase P6: Application API Keys (Unit Tests)', () => {
     });
 
     it('produces completely different HMACs under different peppers (avalanche effect)', () => {
-      const secret = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-      const otherPepper = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+      const secret = crypto.randomBytes(32).toString('hex');
+      const otherPepper = crypto.randomBytes(32).toString('hex');
       const hmac1 = computeKeyHmac(secret, TEST_PEPPER);
       const hmac2 = computeKeyHmac(secret, otherPepper);
 
@@ -417,7 +417,7 @@ describe('Phase P6: Application API Keys (Unit Tests)', () => {
       },
       secrets: {
         pepper: TEST_PEPPER,
-        kek: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        kek: crypto.randomBytes(32).toString('hex'),
         jwtPrivateKey: 'dummy',
         checkpointPrivateKey: 'dummy',
       },
@@ -577,7 +577,7 @@ describe('Phase P6: Application API Keys (Unit Tests)', () => {
       },
       secrets: {
         pepper: TEST_PEPPER,
-        kek: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        kek: crypto.randomBytes(32).toString('hex'),
         jwtPrivateKey: 'dummy',
         checkpointPrivateKey: 'dummy',
       },
