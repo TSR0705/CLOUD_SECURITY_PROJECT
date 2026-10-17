@@ -1,0 +1,149 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P18 RULES MATRIX EVIDENCE
+CANONICAL RECONCILIATION OF RULES R1–R7 AND R2/R3 PRECEDENCE
+================================================================================
+
+1. CANONICAL RULE HIERARCHY & RECONCILED SPECIFICATION
+--------------------------------------------------------------------------------
+The Deterministic Decision Engine (packages/decision-engine) enforces rules R1–R7
+in strict canonical precedence matching the authoritative Build Plan (Table 2.3),
+ADR-0009, and Attack Taxonomy (T5). All decisions are pure mathematical functions:
+  decide(policy, fileVersion, findings) -> DecisionResult
+
+Canonical Rules Summary & Precedence:
+  R1: Result Identity Verification (Mandatory Precondition / Safety Invariant)
+      Asserts that finding scannedSha256, scannedStorageVersionId, and scannedSizeBytes
+      strictly match the immutable file_versions ingest identity (bucket, key, version, sha, size).
+      Any mismatch or malformed artifact identity strictly yields:
+        -> BLOCK / RESULT_IDENTITY_MISMATCH (Rule R1)
+
+  R2: Required Checks and Scanner Errors
+      Verifies that all policy.requiredChecks are satisfied in findings.
+      - Missing required check -> ERROR / REQUIRED_CHECK_MISSING (Rule R2)
+      - Scanner daemon offline or stale signatures (> 7 days) -> ERROR / SCANNER_UNAVAILABLE (Rule R2)
+      - Scanner timeout exceeded -> ERROR / SCAN_TIMEOUT (Rule R2)
+      - Subprocess / parser failure -> ERROR / SCANNER_ERROR (Rule R2)
+
+  R3: High- and Critical-Severity Failures
+      Any finding with outcome FAIL and severity CRITICAL or HIGH produces:
+        -> BLOCK (Rule R3)
+      Primary reason is selected deterministically from highest-severity threat finding.
+      Evaluates malware (MALWARE_DETECTED), active PDF content (ACTIVE_CONTENT_DETECTED),
+      OOXML macros (OOXML_MACRO_DETECTED), embedded executables (EMBEDDED_EXECUTABLE_DETECTED),
+      polyglots (POLYGLOT_DETECTED), and archive structural attacks (ARCHIVE_BOMB_DETECTED,
+      ZIP_SLIP_DETECTED, OVERLAPPING_ENTRIES, UNSAFE_PATH, ENCRYPTED_ARCHIVE_FORBIDDEN).
+
+      *** R2 / R3 PRECEDENCE EXCEPTION ***
+      Threat detection (R3 BLOCK) strictly outranks scanner errors or missing checks (R2 ERROR).
+      If an artifact contains confirmed malware or an archive bomb, and another check errors or
+      is omitted, the decision is BLOCK (R3), NEVER ERROR (R2).
+
+  R4: Medium-Severity and Suspicious Findings
+      Any finding with outcome FAIL and severity MEDIUM, or outcome SUSPICIOUS, or WARN with
+      severity MEDIUM (e.g. OOXML external relationships, duplicate archive entries, detector
+      disagreements) follows policy.onSuspicious:
+        -> QUARANTINE (default) or BLOCK (if configured) (Rule R4)
+      Primary reason is the reasonCode of the applicable medium/suspicious finding.
+      (If detector disagreement occurs and policy.disagreementAction === 'FLAG', terminal R4
+      decision is skipped so the finding only contributes to risk score).
+
+  R5: Required Content Disarm and Reconstruction (CDR)
+      When policy.cdrRequired === true:
+      Verifies that a sanitized CDR finding with outcome PASS is present.
+      If absent or failed:
+        -> QUARANTINE / CDR_REQUIRED_NOT_DONE (Rule R5)
+      (Follows policy.onSuspicious if explicitly configured to BLOCK).
+
+  R6: Manual-Review Risk Threshold
+      When cumulative risk score of findings reaches or exceeds the review threshold:
+      riskScore >= (policy.manualReview ?? policy.manualReviewThreshold ?? 50)
+        -> QUARANTINE / RISK_THRESHOLD (Rule R6)
+      (Follows policy.onSuspicious if explicitly configured to BLOCK).
+      Boundary condition:
+        riskScore == threshold     -> QUARANTINE / RISK_THRESHOLD (R6)
+        riskScore == threshold - 1 -> ALLOW / ALL_CHECKS_PASSED (R7, below threshold)
+
+  R7: Default Allow / Clean Verification
+      If no higher-priority rule applies and all checks pass without error, threat,
+      or unresolved suspicious findings:
+        -> ALLOW / ALL_CHECKS_PASSED (Rule R7)
+      Preserves computedRiskScore (non-zero if low-severity findings exist below threshold).
+
+2. TEST SUITE EXECUTION (tests/unit/decision-engine/rules.test.ts)
+--------------------------------------------------------------------------------
+Command:
+pnpm vitest run tests/unit/decision-engine/rules.test.ts --reporter=verbose
+
+Output:
+ RUN  v5.0.1 C:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT
+
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R1 — Artifact Identity Verification > fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) if fileVersion identity is null or missing fields
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R1 — Artifact Identity Verification > fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) on invalid SHA-256 or negative size
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R1 — Artifact Identity Verification > fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) if finding scannedSha256 does not match fileVersion identity
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R1 — Artifact Identity Verification > fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) if finding scannedStorageVersionId does not match
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R1 — Artifact Identity Verification > fails closed (BLOCK / RESULT_IDENTITY_MISMATCH) if finding scannedSizeBytes does not match
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R1 — Artifact Identity Verification > supports alternative snake_case identity field naming and Buffer SHA256 input
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R2 — Required Checks & Scanner Errors > fails closed (ERROR / REQUIRED_CHECK_MISSING) when a required check is omitted from findings
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R2 — Required Checks & Scanner Errors > fails closed (ERROR / SCANNER_UNAVAILABLE) when scanner daemon is offline or signatures stale
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R2 — Required Checks & Scanner Errors > fails closed (ERROR / SCAN_TIMEOUT) when scanner execution times out
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R2 — Required Checks & Scanner Errors > fails closed (ERROR / CLAMAV_SCAN_TIMEOUT) when a specific error reason code is emitted
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R2 — Required Checks & Scanner Errors > does not trigger R2 ERROR if an optional (non-required) check has an error
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R3 — Threat Detection (Malware & High-Risk Indicators) > produces BLOCK on CRITICAL finding (e.g. MALWARE_DETECTED)
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R3 — Threat Detection (Malware & High-Risk Indicators) > produces BLOCK on HIGH severity finding (e.g. OFFICE_MACRO_PRESENT)
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > R2 / R3 Precedence — Threat (BLOCK) Wins Over Scanner Error (ERROR) > CRITICAL threat takes precedence over missing required check -> BLOCK, NOT ERROR
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > R2 / R3 Precedence — Threat (BLOCK) Wins Over Scanner Error (ERROR) > HIGH threat takes precedence over scanner timeout/error -> BLOCK, NOT ERROR
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > R2 / R3 Precedence — Threat (BLOCK) Wins Over Scanner Error (ERROR) > Scanner error takes precedence when only LOW/INFO findings exist -> ERROR
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R3 — Threat Detection (Malware, Exploits, Archive Bombs & Structural Failures) > blocks on ARCHIVE_BOMB_DETECTED (HIGH/CRITICAL severity)
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R3 — Threat Detection (Malware, Exploits, Archive Bombs & Structural Failures) > blocks on ZIP_SLIP_DETECTED or OVERLAPPING_ENTRIES
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > quarantines on medium severity FAIL finding under default onSuspicious (e.g. OOXML external relationship)
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > quarantines on medium severity archive finding (e.g. DUPLICATE_ENTRY_NAMES) and sets integrityResult to FAIL
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > blocks on medium severity FAIL finding when policy.onSuspicious === "BLOCK"
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > triggers policy.onSuspicious (QUARANTINE) on explicit SUSPICIOUS outcome finding
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > triggers policy.onSuspicious (BLOCK) on explicit SUSPICIOUS outcome finding when onSuspicious is BLOCK
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > quarantines when disagreementAction is QUARANTINE and detector disagreement occurs
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > quarantines by default when detector disagreement occurs and disagreementAction is not configured
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > blocks when disagreementAction is BLOCK and detector disagreement occurs
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R4 — Medium-Severity and Suspicious Findings > flags detector disagreement when disagreementAction is FLAG without triggering R4
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R5 — Required Content Disarm and Reconstruction (CDR) > quarantines with CDR_REQUIRED_NOT_DONE when cdrRequired is true and no CDR check exists
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R5 — Required Content Disarm and Reconstruction (CDR) > blocks with CDR_REQUIRED_NOT_DONE when cdrRequired is true and onSuspicious is BLOCK
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R5 — Required Content Disarm and Reconstruction (CDR) > quarantines with CDR_REQUIRED_NOT_DONE when cdrRequired is true and CDR check failed
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R5 — Required Content Disarm and Reconstruction (CDR) > allows file when cdrRequired is true and a sanitized CDR check with PASS is present
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R6 — Manual-Review Risk Threshold > quarantines with RISK_THRESHOLD when cumulative risk score reaches manualReviewThreshold
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R6 — Manual-Review Risk Threshold > blocks with RISK_THRESHOLD when risk score meets manualReviewThreshold and policy.onSuspicious === "BLOCK"
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R6 — Manual-Review Risk Threshold > boundary: risk score equal to manualReviewThreshold (score === threshold) triggers R6
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R6 — Manual-Review Risk Threshold > boundary: risk score immediately below manualReviewThreshold (score === threshold - 1) allows file
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R6 — Manual-Review Risk Threshold > allows clean file with a nonzero risk score below review threshold
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R7 — Clean Allow & Fail-Closed Fallback > produces ALLOW when all required checks pass cleanly and risk score is 0
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R7 — Clean Allow & Fail-Closed Fallback > produces ALLOW when risk score is below manual review threshold and all checks are clear
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R7 — Clean Allow & Fail-Closed Fallback > produces an explainable sug.decision/v1 record with complete provenance
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > Rule R7 — Clean Allow & Fail-Closed Fallback > sorts reasons deterministically
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention > does not bypass R4 when a FLAG disagreement is present alongside a MEDIUM failure
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention > does not bypass R4 when a FLAG disagreement is present alongside another SUSPICIOUS finding
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention > evaluates multiple disagreements and multiple medium findings deterministically
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P1 Regression — R4 Multi-Finding Candidate Evaluation and FLAG Bypass Prevention > elevates decision to BLOCK when disagreementAction is BLOCK even if non-disagreement candidate is ranked first
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P2 Regression — Canonical Archive Structural Reason Classification & Integrity > blocks and marks integrityResult FAIL on COMPRESSION_RATIO_EXCEEDED even with arbitrary checkId
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P2 Regression — Canonical Archive Structural Reason Classification & Integrity > blocks and marks integrityResult FAIL on UNCOMPRESSED_SIZE_EXCEEDED
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P2 Regression — Canonical Archive Structural Reason Classification & Integrity > blocks and marks integrityResult FAIL on ENTRY_COUNT_EXCEEDED
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P2 Regression — Canonical Archive Structural Reason Classification & Integrity > blocks and marks integrityResult FAIL on NESTED_ARCHIVE_DEPTH_EXCEEDED
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > quarantines on SCANNER_LIMIT_EXCEEDED under default onSuspicious
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > blocks on SCANNER_LIMIT_EXCEEDED when policy.onSuspicious is BLOCK
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > evaluates P11 MAGIC_EXTENSION_MISMATCH as detector disagreement obeying policy
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > evaluates P11 MAGIC_MIME_MISMATCH and MIME_EXTENSION_MISMATCH as detector disagreements
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P3 Regression — Registered Canonical Reason Codes (Failure Matrix & P11) > evaluates TYPE_UNDETERMINED as detector disagreement yielding QUARANTINE
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P4 Regression — Scanner Failures and Precedence Invariants > produces ERROR on SCAN_TIMEOUT
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P4 Regression — Scanner Failures and Precedence Invariants > produces ERROR on SCANNER_UNAVAILABLE
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P4 Regression — Scanner Failures and Precedence Invariants > ensures CRITICAL threat overrides SCAN_TIMEOUT error -> BLOCK
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P5 Regression — policy.archiveAllowed Enforcement > blocks with ARCHIVE_FORBIDDEN when policy.archiveAllowed is false and archive finding is present
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P5 Regression — policy.archiveAllowed Enforcement > allows benign non-archive file when policy.archiveAllowed is false
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P5 Regression — policy.archiveAllowed Enforcement > allows clean archive when policy.archiveAllowed is true
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P5 Regression — policy.archiveAllowed Enforcement > allows clean archive when policy.archiveAllowed is unspecified (undefined)
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P6 Regression — policyResult Consistency > sets policyResult to FAIL when R4 emits BLOCK
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P6 Regression — policyResult Consistency > sets policyResult to FAIL when R5 triggers due to missing required CDR
+ ✓ tests/unit/decision-engine/rules.test.ts > Deterministic Decision Engine — Rules R1–R7 & Precedence (Phase P18) > P6 Regression — policyResult Consistency > sets policyResult to FAIL when R6 triggers due to exceeded manual review threshold
+
+ Test Files  1 passed (1)
+      Tests  65 passed (65)
+   Duration  324ms
+
+VERDICT: FULL PASS
+All 65 canonical test cases for Rules R1–R7, R2/R3 precedence, and P1–P6 regressions verified and passed.

@@ -3049,6 +3049,1258 @@
           }
         }
       }
+    },
+    "/api/v1/security-decisions/{id}": {
+      "get": {
+        "summary": "Get security decision details",
+        "tags": ["Decisions"],
+        "description": "Retrieves the deterministic security decision, explainable sug.decision/v1 record, and bound artifact identity. Requires API key or authenticated dashboard user, enforcing tenant isolation.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Decision UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "fileVersionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "scanJobId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "policyId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": ["ALLOW", "BLOCK", "QUARANTINE", "ERROR"],
+                      "example": "ALLOW"
+                    },
+                    "primaryReason": {
+                      "type": "string",
+                      "example": "CLEAN"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+                      "example": "INFO"
+                    },
+                    "confidence": {
+                      "type": "string",
+                      "enum": ["CONFIRMED", "HIGH", "MEDIUM", "LOW"],
+                      "example": "CONFIRMED"
+                    },
+                    "riskScore": {
+                      "type": "integer",
+                      "example": 0
+                    },
+                    "policyResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "scannerResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "integrityResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "authorizationResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "boundBucket": {
+                      "type": "string",
+                      "example": "sug-quarantine"
+                    },
+                    "boundKey": {
+                      "type": "string",
+                      "example": "incoming/app/file"
+                    },
+                    "boundStorageVersionId": {
+                      "type": "string",
+                      "example": "v12345"
+                    },
+                    "boundSha256": {
+                      "type": "string",
+                      "example": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "boundSize": {
+                      "type": "integer",
+                      "example": 1024
+                    },
+                    "record": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "engineVersion": {
+                      "type": "string",
+                      "example": "1.0.0"
+                    },
+                    "decidedBy": {
+                      "type": "string",
+                      "example": "engine"
+                    },
+                    "supersedesId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "fileVersionId",
+                    "policyId",
+                    "decision",
+                    "primaryReason",
+                    "severity",
+                    "confidence",
+                    "riskScore",
+                    "policyResult",
+                    "scannerResult",
+                    "integrityResult",
+                    "authorizationResult",
+                    "boundBucket",
+                    "boundKey",
+                    "boundStorageVersionId",
+                    "boundSha256",
+                    "boundSize",
+                    "record",
+                    "engineVersion",
+                    "decidedBy",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/security-decisions/{id}": {
+      "get": {
+        "summary": "Get security decision details",
+        "tags": ["Decisions"],
+        "description": "Retrieves the deterministic security decision, explainable sug.decision/v1 record, and bound artifact identity. Requires API key or authenticated dashboard user, enforcing tenant isolation.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Decision UUID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "fileVersionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "scanJobId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "policyId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": ["ALLOW", "BLOCK", "QUARANTINE", "ERROR"],
+                      "example": "ALLOW"
+                    },
+                    "primaryReason": {
+                      "type": "string",
+                      "example": "CLEAN"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+                      "example": "INFO"
+                    },
+                    "confidence": {
+                      "type": "string",
+                      "enum": ["CONFIRMED", "HIGH", "MEDIUM", "LOW"],
+                      "example": "CONFIRMED"
+                    },
+                    "riskScore": {
+                      "type": "integer",
+                      "example": 0
+                    },
+                    "policyResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "scannerResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "integrityResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "authorizationResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "boundBucket": {
+                      "type": "string",
+                      "example": "sug-quarantine"
+                    },
+                    "boundKey": {
+                      "type": "string",
+                      "example": "incoming/app/file"
+                    },
+                    "boundStorageVersionId": {
+                      "type": "string",
+                      "example": "v12345"
+                    },
+                    "boundSha256": {
+                      "type": "string",
+                      "example": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "boundSize": {
+                      "type": "integer",
+                      "example": 1024
+                    },
+                    "record": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "engineVersion": {
+                      "type": "string",
+                      "example": "1.0.0"
+                    },
+                    "decidedBy": {
+                      "type": "string",
+                      "example": "engine"
+                    },
+                    "supersedesId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "fileVersionId",
+                    "policyId",
+                    "decision",
+                    "primaryReason",
+                    "severity",
+                    "confidence",
+                    "riskScore",
+                    "policyResult",
+                    "scannerResult",
+                    "integrityResult",
+                    "authorizationResult",
+                    "boundBucket",
+                    "boundKey",
+                    "boundStorageVersionId",
+                    "boundSha256",
+                    "boundSize",
+                    "record",
+                    "engineVersion",
+                    "decidedBy",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/security-decisions/{id}/review": {
+      "post": {
+        "summary": "Perform human review on a security decision",
+        "tags": ["Decisions"],
+        "description": "Allows an authorized analyst or admin to review a quarantined decision and emit a superseding ALLOW or BLOCK decision with audit justification. Rejects attempts to override ERROR decisions.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": ["ALLOW", "BLOCK"],
+                    "description": "Review decision outcome"
+                  },
+                  "justification": {
+                    "type": "string",
+                    "minLength": 10,
+                    "description": "Detailed rationale for human override"
+                  }
+                },
+                "required": ["action", "justification"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Decision UUID to review"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "fileVersionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "scanJobId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "policyId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": ["ALLOW", "BLOCK", "QUARANTINE", "ERROR"],
+                      "example": "ALLOW"
+                    },
+                    "primaryReason": {
+                      "type": "string",
+                      "example": "CLEAN"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+                      "example": "INFO"
+                    },
+                    "confidence": {
+                      "type": "string",
+                      "enum": ["CONFIRMED", "HIGH", "MEDIUM", "LOW"],
+                      "example": "CONFIRMED"
+                    },
+                    "riskScore": {
+                      "type": "integer",
+                      "example": 0
+                    },
+                    "policyResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "scannerResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "integrityResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "authorizationResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "boundBucket": {
+                      "type": "string",
+                      "example": "sug-quarantine"
+                    },
+                    "boundKey": {
+                      "type": "string",
+                      "example": "incoming/app/file"
+                    },
+                    "boundStorageVersionId": {
+                      "type": "string",
+                      "example": "v12345"
+                    },
+                    "boundSha256": {
+                      "type": "string",
+                      "example": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "boundSize": {
+                      "type": "integer",
+                      "example": 1024
+                    },
+                    "record": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "engineVersion": {
+                      "type": "string",
+                      "example": "1.0.0"
+                    },
+                    "decidedBy": {
+                      "type": "string",
+                      "example": "engine"
+                    },
+                    "supersedesId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "fileVersionId",
+                    "policyId",
+                    "decision",
+                    "primaryReason",
+                    "severity",
+                    "confidence",
+                    "riskScore",
+                    "policyResult",
+                    "scannerResult",
+                    "integrityResult",
+                    "authorizationResult",
+                    "boundBucket",
+                    "boundKey",
+                    "boundStorageVersionId",
+                    "boundSha256",
+                    "boundSize",
+                    "record",
+                    "engineVersion",
+                    "decidedBy",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/security-decisions/{id}/review": {
+      "post": {
+        "summary": "Perform human review on a security decision",
+        "tags": ["Decisions"],
+        "description": "Allows an authorized analyst or admin to review a quarantined decision and emit a superseding ALLOW or BLOCK decision with audit justification. Rejects attempts to override ERROR decisions.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": ["ALLOW", "BLOCK"],
+                    "description": "Review decision outcome"
+                  },
+                  "justification": {
+                    "type": "string",
+                    "minLength": 10,
+                    "description": "Detailed rationale for human override"
+                  }
+                },
+                "required": ["action", "justification"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Decision UUID to review"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "fileVersionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "scanJobId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "policyId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": ["ALLOW", "BLOCK", "QUARANTINE", "ERROR"],
+                      "example": "ALLOW"
+                    },
+                    "primaryReason": {
+                      "type": "string",
+                      "example": "CLEAN"
+                    },
+                    "severity": {
+                      "type": "string",
+                      "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+                      "example": "INFO"
+                    },
+                    "confidence": {
+                      "type": "string",
+                      "enum": ["CONFIRMED", "HIGH", "MEDIUM", "LOW"],
+                      "example": "CONFIRMED"
+                    },
+                    "riskScore": {
+                      "type": "integer",
+                      "example": 0
+                    },
+                    "policyResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "scannerResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "integrityResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "authorizationResult": {
+                      "type": "string",
+                      "example": "PASS"
+                    },
+                    "boundBucket": {
+                      "type": "string",
+                      "example": "sug-quarantine"
+                    },
+                    "boundKey": {
+                      "type": "string",
+                      "example": "incoming/app/file"
+                    },
+                    "boundStorageVersionId": {
+                      "type": "string",
+                      "example": "v12345"
+                    },
+                    "boundSha256": {
+                      "type": "string",
+                      "example": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "boundSize": {
+                      "type": "integer",
+                      "example": 1024
+                    },
+                    "record": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "engineVersion": {
+                      "type": "string",
+                      "example": "1.0.0"
+                    },
+                    "decidedBy": {
+                      "type": "string",
+                      "example": "engine"
+                    },
+                    "supersedesId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "fileVersionId",
+                    "policyId",
+                    "decision",
+                    "primaryReason",
+                    "severity",
+                    "confidence",
+                    "riskScore",
+                    "policyResult",
+                    "scannerResult",
+                    "integrityResult",
+                    "authorizationResult",
+                    "boundBucket",
+                    "boundKey",
+                    "boundStorageVersionId",
+                    "boundSha256",
+                    "boundSize",
+                    "record",
+                    "engineVersion",
+                    "decidedBy",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/security-decisions/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [

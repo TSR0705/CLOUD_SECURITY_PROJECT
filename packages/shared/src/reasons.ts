@@ -25,6 +25,20 @@ export type CanonicalReasonCode =
   | 'CLEAN'
   | 'SCANNER_ERROR'
   | 'NOT_APPLICABLE'
+  | 'REQUIRED_CHECK_MISSING'
+  | 'SCANNER_UNAVAILABLE'
+  | 'SCAN_TIMEOUT'
+  | 'RESULT_IDENTITY_MISMATCH'
+  | 'CDR_REQUIRED'
+  | 'CDR_REQUIRED_NOT_DONE'
+  | 'RISK_THRESHOLD'
+  | 'ALL_CHECKS_PASSED'
+  | 'DETECTOR_DISAGREEMENT'
+  | 'TYPE_UNDETERMINED'
+  | 'SCANNER_LIMIT_EXCEEDED'
+  | 'MAGIC_EXTENSION_MISMATCH'
+  | 'MAGIC_MIME_MISMATCH'
+  | 'MIME_EXTENSION_MISMATCH'
   // Malware / Pattern
   | 'MALWARE_DETECTED'
   // Archive (P16)
@@ -93,6 +107,126 @@ export const REASON_CODE_REGISTRY: Readonly<Record<CanonicalReasonCode, ReasonCo
     defaultSeverity: 'INFO',
     defaultConfidence: 'CONFIRMED',
     description: 'Detector not applicable to the artifact format or MIME type.',
+  },
+  REQUIRED_CHECK_MISSING: {
+    reasonCode: 'REQUIRED_CHECK_MISSING',
+    checkId: 'universal',
+    defaultOutcome: 'ERROR',
+    defaultSeverity: 'HIGH',
+    defaultConfidence: 'CONFIRMED',
+    description: 'A required inspection check mandated by policy was omitted or not performed.',
+  },
+  SCANNER_UNAVAILABLE: {
+    reasonCode: 'SCANNER_UNAVAILABLE',
+    checkId: 'universal',
+    defaultOutcome: 'ERROR',
+    defaultSeverity: 'HIGH',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'Underlying scanner daemon or service is offline, unreachable, or signature database is stale.',
+  },
+  SCAN_TIMEOUT: {
+    reasonCode: 'SCAN_TIMEOUT',
+    checkId: 'universal',
+    defaultOutcome: 'ERROR',
+    defaultSeverity: 'HIGH',
+    defaultConfidence: 'CONFIRMED',
+    description: 'Scanner inspection exceeded execution time ceiling.',
+  },
+  RESULT_IDENTITY_MISMATCH: {
+    reasonCode: 'RESULT_IDENTITY_MISMATCH',
+    checkId: 'universal',
+    defaultOutcome: 'FAIL',
+    defaultSeverity: 'HIGH',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'Scanned artifact identity (hash, version, size) does not match immutable file version identity.',
+  },
+  CDR_REQUIRED: {
+    reasonCode: 'CDR_REQUIRED',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'Policy mandates Content Disarm and Reconstruction (CDR), but no sanitized artifact is available.',
+  },
+  CDR_REQUIRED_NOT_DONE: {
+    reasonCode: 'CDR_REQUIRED_NOT_DONE',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'Policy mandates Content Disarm and Reconstruction (CDR), but no sanitized artifact is available.',
+  },
+  RISK_THRESHOLD: {
+    reasonCode: 'RISK_THRESHOLD',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description:
+      'Cumulative risk score of findings reaches or exceeds the policy manual review threshold.',
+  },
+  ALL_CHECKS_PASSED: {
+    reasonCode: 'ALL_CHECKS_PASSED',
+    checkId: 'universal',
+    defaultOutcome: 'PASS',
+    defaultSeverity: 'INFO',
+    defaultConfidence: 'CONFIRMED',
+    description:
+      'All policy-mandated security inspection checks passed cleanly without error or threat.',
+  },
+  DETECTOR_DISAGREEMENT: {
+    reasonCode: 'DETECTOR_DISAGREEMENT',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description:
+      'Contradictory file types identified across magic bytes, extension, or MIME header.',
+  },
+  TYPE_UNDETERMINED: {
+    reasonCode: 'TYPE_UNDETERMINED',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description:
+      'Artifact file type could not be definitively determined from header or structure.',
+  },
+  SCANNER_LIMIT_EXCEEDED: {
+    reasonCode: 'SCANNER_LIMIT_EXCEEDED',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description: 'Scanner resource limit exceeded (size, stream length, or recursion depth).',
+  },
+  MAGIC_EXTENSION_MISMATCH: {
+    reasonCode: 'MAGIC_EXTENSION_MISMATCH',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description: 'Detected file signature conflicts with filename extension.',
+  },
+  MAGIC_MIME_MISMATCH: {
+    reasonCode: 'MAGIC_MIME_MISMATCH',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description: 'Detected file signature conflicts with client-declared MIME type.',
+  },
+  MIME_EXTENSION_MISMATCH: {
+    reasonCode: 'MIME_EXTENSION_MISMATCH',
+    checkId: 'universal',
+    defaultOutcome: 'SUSPICIOUS',
+    defaultSeverity: 'MEDIUM',
+    defaultConfidence: 'HIGH',
+    description: 'Client-declared MIME type conflicts with filename extension.',
   },
   MALWARE_DETECTED: {
     reasonCode: 'MALWARE_DETECTED',

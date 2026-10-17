@@ -75,6 +75,7 @@ export default [
                 { to: { element: { type: 'pkg-shared' } } },
                 { to: { element: { type: 'pkg-storage' } } },
                 { to: { element: { type: 'pkg-policy' } } },
+                { to: { element: { type: 'pkg-decision' } } },
               ],
             },
             {

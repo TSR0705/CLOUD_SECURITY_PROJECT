@@ -27,6 +27,7 @@ import { createS3Provider, type StorageProvider } from '@sug/storage';
 import { StreamingUploadService } from './upload/streaming-service.js';
 import { uploadRoutes } from './routes/upload.js';
 import { scansRoutes } from './routes/scans.js';
+import { securityDecisionsRoutes } from './routes/security-decisions.js';
 import pg from 'pg';
 
 export interface AppOptions {
@@ -313,6 +314,13 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
 
   // 13. Scan Findings & Status Routes (P17)
   await app.register(scansRoutes, {
+    db: authDb,
+    apiKeyService,
+    jwtPublicKeyPem,
+  });
+
+  // 14. Security Decisions & Human Review Routes (P18)
+  await app.register(securityDecisionsRoutes, {
     db: authDb,
     apiKeyService,
     jwtPublicKeyPem,

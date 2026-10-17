@@ -1,0 +1,35 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P18 BRANCH COVERAGE EVIDENCE
+PACKAGE: @sug/decision-engine (packages/decision-engine/src)
+================================================================================
+
+Command:
+npx vitest run tests/unit/decision-engine/ tests/integration/decision/ --coverage
+
+Test Results:
+  Test Files  6 passed (6)
+       Tests  99 passed (99)
+    Duration  2.95s
+
+% Coverage report from v8
+-------------------------|---------|----------|---------|---------|-------------------
+File                     | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+-------------------------|---------|----------|---------|---------|-------------------
+packages/decision-engine |     100 |      100 |     100 |     100 |
+  engine.ts              |     100 |      100 |     100 |     100 | None
+  index.ts               |     100 |      100 |     100 |     100 | None
+  mapping.ts             |     100 |      100 |     100 |     100 | None
+  persistence.ts         |     100 |      100 |     100 |     100 | None
+  review.ts              |     100 |      100 |     100 |     100 | None
+  risk.ts                |     100 |      100 |     100 |     100 | None
+  types.ts               |     100 |      100 |     100 |     100 | None
+-------------------------|---------|----------|---------|---------|-------------------
+
+COVERAGE REQUIREMENT: 100% Branch Coverage for packages/decision-engine/src
+ACHIEVED:
+  - Statements: 100.00%
+  - Branches:   100.00%
+  - Functions:  100.00%
+  - Lines:      100.00%
+
+VERDICT: FULL PASS (100% Branch and Line Coverage on all designated files)

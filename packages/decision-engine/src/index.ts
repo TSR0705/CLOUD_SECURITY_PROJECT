@@ -1,16 +1,23 @@
 /**
  * @sug/decision-engine
- * Deterministic decision engine contracts and rules
+ * Deterministic decision engine contracts, rules R1–R7, and explainable record generator.
  */
 
-export const Decision_EnginePackageName = '@sug/decision-engine' as const;
+export const DecisionEnginePackageName = '@sug/decision-engine' as const;
 
-export interface Decision_EngineInfo {
-  name: typeof Decision_EnginePackageName;
+export interface DecisionEngineInfo {
+  name: typeof DecisionEnginePackageName;
   version: string;
 }
 
-export const Decision_EngineInfo: Decision_EngineInfo = {
-  name: Decision_EnginePackageName,
-  version: '0.1.0',
+export const DecisionEngineInfo: DecisionEngineInfo = {
+  name: DecisionEnginePackageName,
+  version: '1.0.0',
 };
+
+export * from './types.js';
+export * from './risk.js';
+export * from './mapping.js';
+export * from './engine.js';
+export * from './review.js';
+export * from './persistence.js';

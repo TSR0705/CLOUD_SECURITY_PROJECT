@@ -32,23 +32,23 @@ The codebase is organized into three strictly segregated tiers:
 
 ## 2. Permitted Dependency Matrix
 
-| From Element              | Permitted Internal Dependencies (`allow`)                             | Explicitly Forbidden Dependencies                     |
-| :------------------------ | :-------------------------------------------------------------------- | :---------------------------------------------------- |
-| **`pkg-shared`**          | `[]` (None; leaf package)                                             | Any app, service, or other package                    |
-| **`pkg-storage`**         | `@sug/shared`                                                         | All services, apps, `pkg-crypto`, `pkg-security`      |
-| **`pkg-policy`**          | `@sug/shared`                                                         | All services, apps, storage, scanning                 |
-| **`pkg-security`**        | `@sug/shared`                                                         | All services, apps, storage, crypto                   |
-| **`pkg-scanner`**         | `@sug/shared`                                                         | All services, apps, promotion, crypto                 |
-| **`pkg-decision`**        | `@sug/shared`                                                         | All services, apps, storage, promotion                |
-| **`pkg-crypto`**          | `@sug/shared`                                                         | All services, apps, scanner, decision                 |
-| **`pkg-audit`**           | `@sug/shared`                                                         | All services, apps, scanner, promotion                |
-| **`pkg-sdk`**             | `@sug/shared`                                                         | All services, storage, crypto, decision               |
-| **`service-api`**         | `@sug/shared`, `@sug/storage`, `@sug/policy-engine`                   | `service-promotion`, `service-scanner`, `pkg-crypto`  |
-| **`service-scanner`**     | `@sug/shared`, `@sug/storage`, `@sug/scanner`, `@sug/security-engine` | `service-promotion`, `service-api`, `pkg-crypto`      |
-| **`service-promotion`**   | `@sug/shared`, `@sug/storage`, `@sug/crypto`, `@sug/decision-engine`  | `service-scanner`, `service-api`                      |
-| **`service-replication`** | `@sug/shared`, `@sug/storage`                                         | All other services, crypto, scanner                   |
-| **`app-dashboard`**       | `@sug/shared`, `@sug/sdk`                                             | `pkg-storage` (DB/S3), `pkg-crypto`, all `services/*` |
-| **`app-client`**          | `@sug/shared`, `@sug/sdk`                                             | All internal services, crypto, storage                |
+| From Element              | Permitted Internal Dependencies (`allow`)                                   | Explicitly Forbidden Dependencies                     |
+| :------------------------ | :-------------------------------------------------------------------------- | :---------------------------------------------------- |
+| **`pkg-shared`**          | `[]` (None; leaf package)                                                   | Any app, service, or other package                    |
+| **`pkg-storage`**         | `@sug/shared`                                                               | All services, apps, `pkg-crypto`, `pkg-security`      |
+| **`pkg-policy`**          | `@sug/shared`                                                               | All services, apps, storage, scanning                 |
+| **`pkg-security`**        | `@sug/shared`                                                               | All services, apps, storage, crypto                   |
+| **`pkg-scanner`**         | `@sug/shared`                                                               | All services, apps, promotion, crypto                 |
+| **`pkg-decision`**        | `@sug/shared`                                                               | All services, apps, storage, promotion                |
+| **`pkg-crypto`**          | `@sug/shared`                                                               | All services, apps, scanner, decision                 |
+| **`pkg-audit`**           | `@sug/shared`                                                               | All services, apps, scanner, promotion                |
+| **`pkg-sdk`**             | `@sug/shared`                                                               | All services, storage, crypto, decision               |
+| **`service-api`**         | `@sug/shared`, `@sug/storage`, `@sug/policy-engine`, `@sug/decision-engine` | `service-promotion`, `service-scanner`, `pkg-crypto`  |
+| **`service-scanner`**     | `@sug/shared`, `@sug/storage`, `@sug/scanner`, `@sug/security-engine`       | `service-promotion`, `service-api`, `pkg-crypto`      |
+| **`service-promotion`**   | `@sug/shared`, `@sug/storage`, `@sug/crypto`, `@sug/decision-engine`        | `service-scanner`, `service-api`                      |
+| **`service-replication`** | `@sug/shared`, `@sug/storage`                                               | All other services, crypto, scanner                   |
+| **`app-dashboard`**       | `@sug/shared`, `@sug/sdk`                                                   | `pkg-storage` (DB/S3), `pkg-crypto`, all `services/*` |
+| **`app-client`**          | `@sug/shared`, `@sug/sdk`                                                   | All internal services, crypto, storage                |
 
 ---
 

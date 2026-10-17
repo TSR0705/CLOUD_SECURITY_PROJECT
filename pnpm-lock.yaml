@@ -260,6 +260,10 @@ importers:
       '@sug/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.6
+        version: 24.13.6
 
   packages/policy-engine:
     dependencies:
@@ -355,6 +359,9 @@ importers:
       '@fastify/swagger':
         specifier: 9.9.0
         version: 9.9.0(supports-color@7.2.0)
+      '@sug/decision-engine':
+        specifier: workspace:*
+        version: link:../../packages/decision-engine
       '@sug/policy-engine':
         specifier: workspace:*
         version: link:../../packages/policy-engine
