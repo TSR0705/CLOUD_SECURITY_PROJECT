@@ -30,6 +30,11 @@ import {
   YaraScanner,
   type YaraScanResult,
 } from '@sug/scanner';
+import {
+  inspectArchive,
+  type ArchiveInspectionResult,
+  type ArchiveInspectionBudget,
+} from '@sug/security-engine';
 
 export {
   DEFAULT_LEASE_TIMEOUT_MS,
@@ -69,6 +74,9 @@ export interface ScannerWorkerOptions {
   enableClamAv?: boolean;
   yaraScanner?: YaraScanner;
   enableYara?: boolean;
+  enableArchive?: boolean;
+  archiveBudget?: Partial<ArchiveInspectionBudget>;
+  archiveAllowed?: boolean;
   rulesDir?: string;
   workerId?: string;
   leaseTimeoutMs?: number;
@@ -85,6 +93,7 @@ export interface ProcessJobResult {
   verified: boolean;
   clamav?: ClamAvScanResult | undefined;
   yara?: YaraScanResult | undefined;
+  archive?: ArchiveInspectionResult | undefined;
   sha256?: string | undefined;
   size?: number | undefined;
   error?: string | undefined;
@@ -98,6 +107,9 @@ export class ScannerWorker {
   readonly enableClamAv: boolean;
   readonly yaraScanner?: YaraScanner | undefined;
   readonly enableYara: boolean;
+  readonly enableArchive: boolean;
+  readonly archiveBudget?: Partial<ArchiveInspectionBudget> | undefined;
+  readonly archiveAllowed?: boolean | undefined;
   private readonly db: DatabaseExecutor;
   private readonly storageProvider: StorageProvider;
   private readonly pollIntervalMs: number;
@@ -144,6 +156,10 @@ export class ScannerWorker {
       this.yaraScanner = undefined;
       this.enableYara = false;
     }
+
+    this.enableArchive = options.enableArchive ?? true;
+    this.archiveBudget = options.archiveBudget;
+    this.archiveAllowed = options.archiveAllowed;
 
     const rawReaperInterval =
       options.reaperIntervalMs ??
@@ -680,7 +696,179 @@ export class ScannerWorker {
         }
       }
 
-      // 9. All enabled scans completed without error! Transition job to SUCCEEDED
+      let archiveResult: ArchiveInspectionResult | undefined;
+
+      // 9. If archive inspection is enabled, check if artifact is a ZIP or OOXML container
+      if (this.enableArchive) {
+        let isZipMagic = false;
+        try {
+          const headerBuf = Buffer.alloc(4);
+          const fd = await fs.promises.open(localArtifactPath, 'r');
+          await fd.read(headerBuf, 0, 4, 0);
+          await fd.close();
+          isZipMagic = headerBuf.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+        } catch {
+          // ignore stat/read failure here
+        }
+
+        let origName = path.basename(objectKey).toLowerCase();
+        let policyDoc: Record<string, unknown> | null = null;
+
+        // Try resolving upload session from objectKey identifier (last UUID in path is upload session ID)
+        const uuidMatches = objectKey.match(
+          /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
+        );
+        const sessionId = uuidMatches ? uuidMatches[uuidMatches.length - 1] : undefined;
+        if (sessionId) {
+          try {
+            const sessionQuery = await this.db.query<{
+              original_filename: string;
+              policy_document: Record<string, unknown> | null;
+            }>(
+              `SELECT us.original_filename, sp.document AS policy_document
+               FROM upload_sessions us
+               LEFT JOIN security_policies sp ON sp.id = us.policy_id
+               WHERE us.id = $1`,
+              [sessionId],
+            );
+            if (sessionQuery.rows.length > 0) {
+              if (sessionQuery.rows[0]!.original_filename) {
+                origName = sessionQuery.rows[0]!.original_filename.toLowerCase();
+              }
+              policyDoc = sessionQuery.rows[0]!.policy_document;
+            }
+          } catch (dbErr) {
+            this.logger.warn('Failed to query upload session / policy for archive check', {
+              jobId: job.id,
+              error: (dbErr as Error).message,
+            });
+          }
+        }
+
+        const isArchiveExt =
+          origName.endsWith('.zip') ||
+          origName.endsWith('.docx') ||
+          origName.endsWith('.xlsx') ||
+          origName.endsWith('.pptx') ||
+          origName.endsWith('.jar') ||
+          origName.endsWith('.odt') ||
+          origName.endsWith('.ods') ||
+          origName.endsWith('.odp');
+        const isOoxml =
+          origName.endsWith('.docx') || origName.endsWith('.xlsx') || origName.endsWith('.pptx');
+
+        if (isZipMagic || isArchiveExt) {
+          this.logger.info('Invoking archive security inspection', {
+            jobId: job.id,
+            isZipMagic,
+            isArchiveExt,
+            isOoxml,
+          });
+
+          const archiveAllowed =
+            this.archiveAllowed !== undefined
+              ? this.archiveAllowed
+              : policyDoc?.archiveAllowed !== undefined
+                ? Boolean(policyDoc.archiveAllowed)
+                : true;
+
+          const budget = {
+            ...(policyDoc?.archive || {}),
+            ...(this.archiveBudget || {}),
+          };
+
+          archiveResult = await inspectArchive({
+            filePath: localArtifactPath,
+            budget,
+            archiveAllowed,
+            isOoxml,
+          });
+
+          const outcome =
+            archiveResult.status === 'CLEAN'
+              ? 'PASS'
+              : archiveResult.status === 'REJECTED'
+                ? 'FAIL'
+                : 'ERROR';
+
+          await this.db.query(
+            `INSERT INTO scan_results (
+               scan_job_id, file_version_id, check_id, engine, engine_version,
+               outcome, reason_code, severity, confidence, evidence,
+               scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+             ) VALUES (
+               $1, $2, 'scanner.archive', 'yauzl', '3.4.0',
+               $3, $4, $5, $6, $7::jsonb,
+               $8, $9, $10, $11
+             )`,
+            [
+              job.id,
+              job.fileVersionId,
+              outcome,
+              archiveResult.reasonCode,
+              archiveResult.severity,
+              archiveResult.confidence,
+              JSON.stringify({
+                status: archiveResult.status,
+                reasonCode: archiveResult.reasonCode,
+                reason: archiveResult.reason,
+                entryCount: archiveResult.entryCount,
+                totalCompressedBytes: archiveResult.totalCompressedBytes,
+                totalDecompressedBytes: archiveResult.totalDecompressedBytes,
+                compressionRatio: archiveResult.compressionRatio,
+                maxNestingDepth: archiveResult.maxNestingDepth,
+                durationMs: archiveResult.durationMs,
+                workerRssBytes: archiveResult.workerRssBytes,
+                details: archiveResult.details,
+              }),
+              storageVersionId,
+              Buffer.from(calculatedSha256, 'hex'),
+              calculatedSize,
+              archiveResult.durationMs,
+            ],
+          );
+
+          if (archiveResult.status === 'ERROR') {
+            this.logger.error('Archive inspection failed with error', {
+              jobId: job.id,
+              reason: archiveResult.reason,
+            });
+
+            const archiveError = new Error(archiveResult.reason || 'Archive inspection error');
+            await failScanJob(this.db, job.id, {
+              workerId: this.workerId,
+              error: archiveError,
+              retryable: true,
+              now: this.now,
+            });
+
+            return {
+              success: false,
+              verified: true,
+              clamav: clamavResult,
+              yara: yaraResult,
+              archive: archiveResult,
+              sha256: calculatedSha256,
+              size: calculatedSize,
+              error: archiveError.message,
+            };
+          } else if (archiveResult.status === 'REJECTED') {
+            this.logger.warn('Archive security inspection detected violation', {
+              jobId: job.id,
+              reasonCode: archiveResult.reasonCode,
+              reason: archiveResult.reason,
+            });
+          } else {
+            this.logger.info('Archive passed security inspection', {
+              jobId: job.id,
+              entryCount: archiveResult.entryCount,
+              durationMs: archiveResult.durationMs,
+            });
+          }
+        }
+      }
+
+      // 10. All enabled scans completed without error! Transition job to SUCCEEDED
       await completeScanJob(this.db, job.id, {
         workerId: this.workerId,
         now: this.now,
@@ -692,6 +880,7 @@ export class ScannerWorker {
         sha256: calculatedSha256,
         clamavStatus: clamavResult?.status,
         yaraStatus: yaraResult?.status,
+        archiveStatus: archiveResult?.status,
       });
 
       return {
@@ -699,6 +888,7 @@ export class ScannerWorker {
         verified: true,
         clamav: clamavResult,
         yara: yaraResult,
+        archive: archiveResult,
         sha256: calculatedSha256,
         size: calculatedSize,
       };

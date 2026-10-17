@@ -1,0 +1,45 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — P16 ARCHIVE TEST SUMMARY
+VERIFICATION MATRIX FOR SAFE ZIP INSPECTION & ZIP-BOMB DEFENSE
+================================================================================
+
+1. CANONICAL TEST MATRIX (arc-01 through arc-09)
+--------------------------------------------------------------------------------
+| Test Code | Description                        | Test Suite | Outcome  | Reason Code                    |
+|-----------|------------------------------------|------------|----------|--------------------------------|
+| arc-01    | Policy Disallowed Archive          | Unit & Int | REJECTED | ARCHIVE_FORBIDDEN              |
+| arc-02A   | Metadata High-Ratio ZIP Bomb       | Unit & Int | REJECTED | ARCHIVE_BOMB_DETECTED          |
+| arc-02B   | Streaming Decompression Bomb       | Unit & Int | REJECTED | COMPRESSION_RATIO_EXCEEDED     |
+| arc-03    | Nested Archive Depth Limit Exceeded| Unit & Int | REJECTED | NESTED_ARCHIVE_DEPTH_EXCEEDED  |
+| arc-04    | Entry Count Limit Exceeded         | Unit       | REJECTED | ENTRY_COUNT_EXCEEDED           |
+| arc-05    | Overlapping Entries (Fifield Bomb) | Unit & Int | REJECTED | OVERLAPPING_ENTRIES            |
+| arc-06    | Lying Size / Stream Size Mismatch  | Unit       | REJECTED | SIZE_MISMATCH                  |
+| arc-07    | Zip Slip / Path Traversal / Device | Unit & Int | REJECTED | ZIP_SLIP_DETECTED              |
+| arc-08    | Encrypted Archive Rejection        | Unit & Int | REJECTED | ENCRYPTED_ARCHIVE_FORBIDDEN    |
+| arc-09    | Symlink Archive Rejection          | Unit & Int | REJECTED | SYMLINK_FORBIDDEN              |
+| arc-misc1 | Chameleon Multiple EOCD Detection  | Unit       | REJECTED | MULTIPLE_EOCD_DETECTED         |
+| arc-misc2 | Duplicate Entry Name Rejection     | Unit       | REJECTED | DUPLICATE_ENTRY_NAMES          |
+| arc-misc3 | Unsupported Compression Methods    | Unit       | REJECTED | UNSUPPORTED_COMPRESSION_METHOD |
+| arc-misc4 | Corrupted CRC-32 Stream Integrity  | Unit       | REJECTED | CRC_MISMATCH                   |
+| arc-misc5 | Clean Stored Archive Inspection    | Unit       | CLEAN    | CLEAN                          |
+| arc-misc6 | Clean Deflated Archive Inspection  | Unit       | CLEAN    | CLEAN                          |
+| arc-misc7 | Clean OOXML (DOCX) Container       | Unit & Int | CLEAN    | CLEAN (No P17 macro checks)    |
+| arc-misc8 | Execution Timeout & Worker Kill    | Unit       | REJECTED | TIMEOUT_EXCEEDED               |
+| arc-misc9 | Nested Cumulative Budget Sanity    | Unit       | REJECTED | UNCOMPRESSED_SIZE_EXCEEDED     |
+
+2. TEST EXECUTION METRICS
+--------------------------------------------------------------------------------
+   - Unit Test Suite:        tests/unit/security-engine/archive.test.ts (28/28 PASS)
+   - Integration Test Suite: tests/integration/scanner/p16-archive.test.ts (12/12 PASS)
+   - Total Archive Tests:    40 tests (40 PASS, 0 FAIL)
+   - Monorepo Total Tests:   46 test files, 645 tests (645 PASS, 0 FAIL)
+
+3. ZERO P17 / P18 CONTAMINATION
+--------------------------------------------------------------------------------
+   - Strictly NO VBA macro parsing or OLE inspection (reserved for P17).
+   - Strictly NO ALLOW/BLOCK policy decisions evaluated in worker (reserved for P18).
+   - Findings recorded deterministically into scan_results with check_id = 'scanner.archive'.
+
+GATE VERDICT: FULL PASS
+Generated At: 2026-10-01T04:56:41.062Z
+================================================================================
