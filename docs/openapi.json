@@ -1130,6 +1130,1081 @@
           }
         }
       }
+    },
+    "/api/v1/policies": {
+      "post": {
+        "summary": "Create security policy version",
+        "tags": ["Policies"],
+        "description": "Creates a new versioned, canonicalized security policy document.",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "UserAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Policy created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Policy created successfully",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "applicationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "example": 1
+                    },
+                    "schema": {
+                      "type": "string",
+                      "example": "sug.policy/v1"
+                    },
+                    "document": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "documentSha256": {
+                      "type": "string",
+                      "example": "0123456789abcdef..."
+                    },
+                    "isActive": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "applicationId",
+                    "version",
+                    "schema",
+                    "document",
+                    "documentSha256",
+                    "isActive",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Validation error",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Unauthorized",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Forbidden",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/policies/{id}": {
+      "get": {
+        "summary": "Get security policy by ID",
+        "tags": ["Policies"],
+        "description": "Fetches policy version metadata and document, enforcing tenant isolation.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "UserAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Policy retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Policy retrieved successfully",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "applicationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "example": 1
+                    },
+                    "schema": {
+                      "type": "string",
+                      "example": "sug.policy/v1"
+                    },
+                    "document": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "documentSha256": {
+                      "type": "string",
+                      "example": "0123456789abcdef..."
+                    },
+                    "isActive": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "applicationId",
+                    "version",
+                    "schema",
+                    "document",
+                    "documentSha256",
+                    "isActive",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Unauthorized",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Not found",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update security policy (creates new immutable version)",
+        "tags": ["Policies"],
+        "description": "Increments policy version (v1 -> v2) without modifying previous immutable versions.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "UserAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New policy version created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "New policy version created",
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "applicationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "example": 1
+                    },
+                    "schema": {
+                      "type": "string",
+                      "example": "sug.policy/v1"
+                    },
+                    "document": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "documentSha256": {
+                      "type": "string",
+                      "example": "0123456789abcdef..."
+                    },
+                    "isActive": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "applicationId",
+                    "version",
+                    "schema",
+                    "document",
+                    "documentSha256",
+                    "isActive",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Validation error",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Unauthorized",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Forbidden",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Not found",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/policies"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/upload/session": {
+      "post": {
+        "summary": "Create upload session",
+        "tags": ["Upload Session"],
+        "description": "Evaluates file metadata against active policy, pins policy version & hash, and issues a 10-minute single-use EdDSA upload token.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "declaredSize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 52428800
+                  },
+                  "declaredMime": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 127
+                  },
+                  "declaredSha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{64}$"
+                  },
+                  "clientRef": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                },
+                "required": ["filename", "declaredSize", "declaredMime"]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Upload session created and token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Upload session created and token issued",
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "uploadToken": {
+                      "type": "string"
+                    },
+                    "tokenJti": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "expiresInSeconds": {
+                      "type": "integer",
+                      "example": 600
+                    },
+                    "quarantineKey": {
+                      "type": "string"
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "version": {
+                          "type": "integer"
+                        },
+                        "documentSha256": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "precheck": {
+                      "type": "object",
+                      "properties": {
+                        "allowed": {
+                          "type": "boolean"
+                        },
+                        "normalizedFilename": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Precheck validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Precheck validation error",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Unauthorized",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Forbidden",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No active policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "No active policy",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/upload/session/{id}/claim": {
+      "post": {
+        "summary": "Claim upload session",
+        "tags": ["Upload Session"],
+        "description": "Single-use atomic claim of an upload session via short-lived upload JWT.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "claimed": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "UPLOADING"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Unauthorized token",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Forbidden",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Not found",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already claimed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Already claimed",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Expired session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Expired session",
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/upload/session"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [

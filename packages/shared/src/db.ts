@@ -269,6 +269,7 @@ export interface SecurityPolicies {
 export interface UploadSessions {
   api_key_id: string;
   application_id: string;
+  claimed_at: Timestamp | null;
   client_ip: string | null;
   client_ref: string | null;
   completed_at: Timestamp | null;
@@ -278,8 +279,11 @@ export interface UploadSessions {
   declared_size: Int8;
   expires_at: Timestamp;
   id: Generated<string>;
+  is_claimed: Generated<boolean>;
   original_filename: string;
+  policy_hash: Buffer | null;
   policy_id: string;
+  policy_version: number | null;
   status: Generated<SessionStatus>;
   token_jti: string;
 }

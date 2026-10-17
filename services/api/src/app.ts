@@ -18,6 +18,11 @@ import { uploadAuthRoutes } from './routes/upload-auth.js';
 import fastifyCookie from '@fastify/cookie';
 import { UserService } from './auth/user-service.js';
 import { userAuthRoutes } from './routes/user-auth.js';
+import { PolicyService } from './policy/policy-service.js';
+import { policyRoutes } from './routes/policy.js';
+import { UploadSessionService } from './upload/session-service.js';
+import { uploadSessionRoutes } from './routes/upload-session.js';
+import { derivePublicKeyPem } from './auth/jwt.js';
 import pg from 'pg';
 
 export interface AppOptions {
@@ -27,6 +32,8 @@ export interface AppOptions {
   apiKeyService?: ApiKeyService | undefined;
   uploadAuthService?: UploadAuthorizationService | undefined;
   userService?: UserService | undefined;
+  policyService?: PolicyService | undefined;
+  uploadSessionService?: UploadSessionService | undefined;
   authDb?: ApiKeyDatabase | undefined;
   logger?: boolean | object | undefined;
   rateLimitMax?: number | undefined;
@@ -236,6 +243,36 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     userService,
     jwtPrivateKeyPem: config.secrets.jwtPrivateKey,
     isProduction: config.nodeEnv === 'production',
+  });
+
+  // 10. Security Policy Engine & Versioning Routes
+  const jwtPublicKeyPem = derivePublicKeyPem(config.secrets.jwtPrivateKey);
+
+  const policyService =
+    options.policyService ??
+    new PolicyService({
+      db: authDb,
+    });
+
+  await app.register(policyRoutes, {
+    apiKeyService,
+    policyService,
+    jwtPublicKeyPem,
+  });
+
+  // 11. Upload Session & Pinned Token Routes
+  const uploadSessionService =
+    options.uploadSessionService ??
+    new UploadSessionService({
+      db: authDb,
+      policyService,
+    });
+
+  await app.register(uploadSessionRoutes, {
+    apiKeyService,
+    uploadSessionService,
+    jwtPrivateKeyPem: config.secrets.jwtPrivateKey,
+    jwtPublicKeyPem,
   });
 
   // Clean shutdown hook
