@@ -17,3 +17,4 @@ export const SharedInfo: SharedInfo = {
 
 export type * from './db.js';
 export * from './config.js';
+export * from './artifact-identity.js';
