@@ -7,6 +7,8 @@ import {
   type DatabaseExecutor,
   type ClaimedScanJob,
   type ReaperResult,
+  type SeverityLevel,
+  type ConfidenceLevel,
   claimScanJob,
   completeScanJob,
   failScanJob,
@@ -22,7 +24,12 @@ import {
 } from '@sug/shared';
 import type { StorageProvider } from '@sug/storage';
 import { VersionMissing, NotFound, InvalidRequest } from '@sug/storage';
-import { ClamAvScanner, type ClamAvScanResult } from '@sug/scanner';
+import {
+  ClamAvScanner,
+  type ClamAvScanResult,
+  YaraScanner,
+  type YaraScanResult,
+} from '@sug/scanner';
 
 export {
   DEFAULT_LEASE_TIMEOUT_MS,
@@ -31,6 +38,21 @@ export {
   CANONICAL_RECOVERY_SLA_MS,
   validateRecoveryBound,
   validateReaperInterval,
+};
+
+export const SEVERITY_ORDER: Record<SeverityLevel, number> = {
+  CRITICAL: 5,
+  HIGH: 4,
+  MEDIUM: 3,
+  LOW: 2,
+  INFO: 1,
+};
+
+export const CONFIDENCE_ORDER: Record<ConfidenceLevel, number> = {
+  CONFIRMED: 4,
+  HIGH: 3,
+  MEDIUM: 2,
+  LOW: 1,
 };
 
 export interface ScannerLogger {
@@ -45,6 +67,9 @@ export interface ScannerWorkerOptions {
   storageProvider: StorageProvider;
   clamavScanner?: ClamAvScanner;
   enableClamAv?: boolean;
+  yaraScanner?: YaraScanner;
+  enableYara?: boolean;
+  rulesDir?: string;
   workerId?: string;
   leaseTimeoutMs?: number;
   pollIntervalMs?: number;
@@ -58,10 +83,11 @@ export interface ScannerWorkerOptions {
 export interface ProcessJobResult {
   success: boolean;
   verified: boolean;
-  clamav?: ClamAvScanResult;
-  sha256?: string;
-  size?: number;
-  error?: string;
+  clamav?: ClamAvScanResult | undefined;
+  yara?: YaraScanResult | undefined;
+  sha256?: string | undefined;
+  size?: number | undefined;
+  error?: string | undefined;
 }
 
 export class ScannerWorker {
@@ -70,6 +96,8 @@ export class ScannerWorker {
   readonly reaperIntervalMs: number;
   readonly clamavScanner?: ClamAvScanner | undefined;
   readonly enableClamAv: boolean;
+  readonly yaraScanner?: YaraScanner | undefined;
+  readonly enableYara: boolean;
   private readonly db: DatabaseExecutor;
   private readonly storageProvider: StorageProvider;
   private readonly pollIntervalMs: number;
@@ -100,6 +128,21 @@ export class ScannerWorker {
     } else {
       this.clamavScanner = undefined;
       this.enableClamAv = false;
+    }
+
+    if (
+      options.enableYara ||
+      (options.enableYara === undefined && options.yaraScanner !== undefined)
+    ) {
+      this.yaraScanner =
+        options.yaraScanner ??
+        new YaraScanner({
+          rulesPath: options.rulesDir,
+        });
+      this.enableYara = true;
+    } else {
+      this.yaraScanner = undefined;
+      this.enableYara = false;
     }
 
     const rawReaperInterval =
@@ -374,11 +417,13 @@ export class ScannerWorker {
         ],
       );
 
+      let clamavResult: ClamAvScanResult | undefined;
+
       // 7. If ClamAV scanning is enabled, scan local staged artifact via INSTREAM
       if (this.enableClamAv && this.clamavScanner) {
         this.logger.info('Invoking ClamAV INSTREAM scan', { jobId: job.id });
         const clamStream = fs.createReadStream(localArtifactPath);
-        const clamavResult = await this.clamavScanner.scanStream(clamStream);
+        clamavResult = await this.clamavScanner.scanStream(clamStream);
 
         if (clamavResult.status === 'CLEAN') {
           await this.db.query(
@@ -405,23 +450,10 @@ export class ScannerWorker {
             ],
           );
 
-          await completeScanJob(this.db, job.id, {
-            workerId: this.workerId,
-            now: this.now,
-          });
-
           this.logger.info('Scan job passed ClamAV scan', {
             jobId: job.id,
             durationMs: clamavResult.durationMs,
           });
-
-          return {
-            success: true,
-            verified: true,
-            clamav: clamavResult,
-            sha256: calculatedSha256,
-            size: calculatedSize,
-          };
         } else if (clamavResult.status === 'FOUND') {
           this.logger.warn('ClamAV detected malware signature', {
             jobId: job.id,
@@ -452,20 +484,6 @@ export class ScannerWorker {
               clamavResult.durationMs,
             ],
           );
-
-          // Job completed execution; malware finding recorded for future decision engine
-          await completeScanJob(this.db, job.id, {
-            workerId: this.workerId,
-            now: this.now,
-          });
-
-          return {
-            success: true,
-            verified: true,
-            clamav: clamavResult,
-            sha256: calculatedSha256,
-            size: calculatedSize,
-          };
         } else {
           // ClamAV scanner ERROR: fail closed
           this.logger.error('ClamAV scan failed with error', {
@@ -517,7 +535,152 @@ export class ScannerWorker {
         }
       }
 
-      // 8. Transition job to SUCCEEDED (baseline skeleton / compatibility mode)
+      let yaraResult: YaraScanResult | undefined;
+
+      // 8. If YARA scanning is enabled, scan local staged artifact with YARA-X
+      if (this.enableYara && this.yaraScanner) {
+        this.logger.info('Invoking YARA-X scan', { jobId: job.id });
+        yaraResult = await this.yaraScanner.scanFile(localArtifactPath);
+
+        if (yaraResult.status === 'CLEAN') {
+          await this.db.query(
+            `INSERT INTO scan_results (
+               scan_job_id, file_version_id, check_id, engine, engine_version,
+               signature_version, outcome, reason_code, severity, confidence,
+               evidence, scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+             ) VALUES (
+               $1, $2, 'scanner.yara', 'yara-x', $3,
+               $4, 'PASS', 'CLEAN', 'INFO', 'CONFIRMED',
+               $5::jsonb, $6, $7, $8, $9
+             )`,
+            [
+              job.id,
+              job.fileVersionId,
+              yaraResult.engineVersion,
+              yaraResult.signatureVersion,
+              JSON.stringify({
+                status: 'CLEAN',
+                matches: [],
+                rawOutput: yaraResult.rawOutput,
+              }),
+              storageVersionId,
+              Buffer.from(calculatedSha256, 'hex'),
+              calculatedSize,
+              yaraResult.durationMs,
+            ],
+          );
+
+          this.logger.info('Scan job passed YARA-X scan (no rules matched)', {
+            jobId: job.id,
+            durationMs: yaraResult.durationMs,
+          });
+        } else if (yaraResult.status === 'MATCH') {
+          this.logger.warn('YARA-X detected matching security rule(s)', {
+            jobId: job.id,
+            matchCount: yaraResult.matches.length,
+            matches: yaraResult.matches.map((m) => m.identifier),
+          });
+
+          // Determine overall severity and confidence from the highest matching rule
+          let overallSeverity: SeverityLevel = 'INFO';
+          let overallConfidence: ConfidenceLevel = 'LOW';
+          let primaryRuleIdentifier = yaraResult.matches[0]?.identifier ?? 'unknown';
+
+          for (const m of yaraResult.matches) {
+            if (SEVERITY_ORDER[m.meta.severity] > SEVERITY_ORDER[overallSeverity]) {
+              overallSeverity = m.meta.severity;
+              primaryRuleIdentifier = m.identifier;
+            }
+            if (CONFIDENCE_ORDER[m.meta.confidence] > CONFIDENCE_ORDER[overallConfidence]) {
+              overallConfidence = m.meta.confidence;
+            }
+          }
+
+          await this.db.query(
+            `INSERT INTO scan_results (
+               scan_job_id, file_version_id, check_id, engine, engine_version,
+               signature_version, outcome, reason_code, severity, confidence,
+               evidence, scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+             ) VALUES (
+               $1, $2, 'scanner.yara', 'yara-x', $3,
+               $4, 'FAIL', 'MALWARE_DETECTED', $5, $6,
+               $7::jsonb, $8, $9, $10, $11
+             )`,
+            [
+              job.id,
+              job.fileVersionId,
+              yaraResult.engineVersion,
+              yaraResult.signatureVersion,
+              overallSeverity,
+              overallConfidence,
+              JSON.stringify({
+                status: 'MATCH',
+                primaryRule: primaryRuleIdentifier,
+                matchedRules: yaraResult.matches.map((m) => m.identifier),
+                matches: yaraResult.matches,
+                rawOutput: yaraResult.rawOutput,
+              }),
+              storageVersionId,
+              Buffer.from(calculatedSha256, 'hex'),
+              calculatedSize,
+              yaraResult.durationMs,
+            ],
+          );
+        } else {
+          // YARA-X scanner ERROR: fail closed
+          this.logger.error('YARA-X scan failed with error', {
+            jobId: job.id,
+            error: yaraResult.error,
+          });
+
+          await this.db.query(
+            `INSERT INTO scan_results (
+               scan_job_id, file_version_id, check_id, engine, engine_version,
+               signature_version, outcome, reason_code, severity, confidence,
+               evidence, scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+             ) VALUES (
+               $1, $2, 'scanner.yara', 'yara-x', $3,
+               $4, 'ERROR', 'SCANNER_ERROR', 'HIGH', 'CONFIRMED',
+               $5::jsonb, $6, $7, $8, $9
+             )`,
+            [
+              job.id,
+              job.fileVersionId,
+              yaraResult.engineVersion,
+              yaraResult.signatureVersion,
+              JSON.stringify({
+                status: 'ERROR',
+                error: yaraResult.error,
+                rawOutput: yaraResult.rawOutput,
+              }),
+              storageVersionId,
+              Buffer.from(calculatedSha256, 'hex'),
+              calculatedSize,
+              yaraResult.durationMs,
+            ],
+          );
+
+          const scanError = new Error(yaraResult.error || 'YARA-X scanner error');
+          await failScanJob(this.db, job.id, {
+            workerId: this.workerId,
+            error: scanError,
+            retryable: true,
+            now: this.now,
+          });
+
+          return {
+            success: false,
+            verified: true,
+            clamav: clamavResult,
+            yara: yaraResult,
+            sha256: calculatedSha256,
+            size: calculatedSize,
+            error: scanError.message,
+          };
+        }
+      }
+
+      // 9. All enabled scans completed without error! Transition job to SUCCEEDED
       await completeScanJob(this.db, job.id, {
         workerId: this.workerId,
         now: this.now,
@@ -527,11 +690,15 @@ export class ScannerWorker {
         jobId: job.id,
         durationMs,
         sha256: calculatedSha256,
+        clamavStatus: clamavResult?.status,
+        yaraStatus: yaraResult?.status,
       });
 
       return {
         success: true,
         verified: true,
+        clamav: clamavResult,
+        yara: yaraResult,
         sha256: calculatedSha256,
         size: calculatedSize,
       };

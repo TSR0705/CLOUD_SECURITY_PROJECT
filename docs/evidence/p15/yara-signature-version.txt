@@ -1,0 +1,29 @@
+=== P15 SIGNATURE VERSION PROVENANCE & MANIFEST EVIDENCE ===
+
+1. Production Rules Subtree Provenance:
+   - Rules Directory: packages/scanner/rules
+   - Git Revision (rulesGitRevision):   262ebdac9c92cc61e1ce0b1c978793ae0267534f
+   - Content SHA-256 (rulesContentSha): a41bbca2b93af4c5db230cd52b2f141d27411e4cba3179dbf6d1a203e5462da5
+   - Effective signature_version:       262ebdac9c92cc61e1ce0b1c978793ae0267534f
+   - Resolution Source:                 manifest
+
+2. Build-Time Embedded Manifest (packages/scanner/rules/rules_manifest.json):
+{
+  "signatureVersion": "262ebdac9c92cc61e1ce0b1c978793ae0267534f",
+  "rulesGitRevision": "262ebdac9c92cc61e1ce0b1c978793ae0267534f",
+  "rulesContentSha256": "a41bbca2b93af4c5db230cd52b2f141d27411e4cba3179dbf6d1a203e5462da5",
+  "generatedAt": "2026-09-30T13:18:09.709Z"
+}
+
+3. Core Invariants Verification:
+   - Same rules yield identical signature_version: YES (PASSED)
+     (v1: 262ebdac9c92cc61e1ce0b1c978793ae0267534f === v2: 262ebdac9c92cc61e1ce0b1c978793ae0267534f)
+   - Changed rules yield different signature_version: YES (PASSED)
+     (verA: 4264877237cb7164a83ea4396345a0556dc8405b06fbc728121e246952d63bb5 !== verB: 6ae45cb656de28453c2d2e48d0244356b9ce51180b7bef4baeeab9959709c2bd)
+   - Container environment resolution operational without .git: YES (PASSED)
+     (Loaded from rules_manifest.json, source: 'manifest', version: '262ebdac9c92cc61e1ce0b1c978793ae0267534f')
+
+4. Exact DB Column Mapping:
+   - scan_results.signature_version = '262ebdac9c92cc61e1ce0b1c978793ae0267534f'
+   - scan_results.engine = 'yara-x'
+   - scan_results.engine_version = '1.20.0'

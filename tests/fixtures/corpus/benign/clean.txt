@@ -1,0 +1,3 @@
+Secure Upload Gateway (SUG) — Clean Documentation Artifact.
+This file contains benign plain text documentation regarding cloud security policies.
+No malicious signatures, macros, shell scripts, or unauthorized patterns are present.

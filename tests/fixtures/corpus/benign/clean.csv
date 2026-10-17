@@ -1,0 +1,5 @@
+id,department,region,access_tier,active
+1001,Engineering,us-east-1,standard,true
+1002,Operations,us-west-2,standard,true
+1003,Security,eu-central-1,elevated,true
+1004,Compliance,us-east-1,auditor,true

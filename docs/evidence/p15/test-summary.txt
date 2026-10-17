@@ -1,0 +1,37 @@
+=== P15 YARA-X COMPREHENSIVE TEST SUITE SUMMARY ===
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90mC:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT[39m
+
+ [32m✓[39m tests/integration/scanner/p14-clamav.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 9524[2mms[22m[39m
+   [32m✓[39m Phase P14: ClamAV Integration & EICAR Scanning (DoD Test Suite) [2m(10)[22m
+     [33m[2m✓[22m[39m scan-07-real-clamd-kill: fails closed (ERROR / not CLEAN) when real sug-clamav container is killed during active scan[33m 8689[2mms[22m[39m
+     [33m[2m✓[22m[39m scan-09: fails closed (ERROR / non-clean) when stream exceeds configured StreamMaxLength (55M)[33m 603[2mms[22m[39m
+ [32m✓[39m tests/integration/scanner/p15-yara.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 1767[2mms[22m[39m
+   [32m✓[39m Phase P15: YARA-X Integration & Rules DoD Test Suite [2m(12)[22m
+     [33m[2m✓[22m[39m fp-01: produces 0 false positives across all files in the curated benign corpus[33m 310[2mms[22m[39m
+     [33m[2m✓[22m[39m DoD: invalid YARA rule causes normal pnpm build to fail with non-zero exit[33m 718[2mms[22m[39m
+[90mstdout[2m | tests/integration/scanner/p13-concurrency.test.ts[2m > [22m[2mPhase P13: Job Queue Concurrency, Locking, and Lifecycle (DoD Suite)[2m > [22m[2mP13-07 & P13-08: killed worker orphaned job is recovered by reaper within 5-minute canonical bound and claimed by worker B
+[22m[39m{
+  "metric": "P13_KILLED_WORKER_RECOVERY_TIMING",
+  "t1_workerClaimed": "2026-09-30T13:18:23.060Z",
+  "t2_workerTerminated": "2026-09-30T13:18:23.062Z",
+  "t3_leaseExpired": "2026-09-30T13:18:23.260Z",
+  "t4_reaperRequeued": "2026-09-30T13:18:23.319Z",
+  "t5_workerBClaimed": "2026-09-30T13:18:23.321Z",
+  "requeueTimeMs": 257,
+  "recoveryTimeMs": 259,
+  "canonicalMaxMs": 300000,
+  "status": "PASS"
+}
+
+ [32m✓[39m tests/integration/scanner/p13-concurrency.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 571[2mms[22m[39m
+ [32m✓[39m tests/unit/scanner/yara.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 334[2mms[22m[39m
+ [32m✓[39m tests/integration/scanner/p13-worker-identity.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 283[2mms[22m[39m
+ [32m✓[39m tests/unit/scanner/clamav.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 139[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m      Tests [22m [1m[32m78 passed[39m[22m[90m (78)[39m
+[2m   Start at [22m 18:48:10
+[2m   Duration [22m 14.13s[2m (tests 93%, import 5%, transform 1%)[22m
+
+Overall Verdict: ALL 78 SCANNER TESTS PASSING (100% SUCCESS RATE)
