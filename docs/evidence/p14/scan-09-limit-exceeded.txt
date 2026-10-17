@@ -1,0 +1,20 @@
+=== SCAN-09: Stream Exceeds StreamMaxLength (55M) Evidence ===
+Test Case: scan-09 (Stream exceeds clamd StreamMaxLength limit)
+Configured Limit: StreamMaxLength = 55M (57,671,680 bytes)
+Payload: 56 MB stream transmitted via INSTREAM protocol
+
+Execution Output:
+{
+  "status": "ERROR",
+  "signature": null,
+  "rawResponse": "INSTREAM size limit exceeded. ERROR",
+  "durationMs": 384,
+  "error": "INSTREAM size limit exceeded."
+}
+
+Verification Invariants:
+1. status === 'ERROR' (true)
+2. status !== 'CLEAN' (true)
+3. rawResponse contains 'INSTREAM size limit exceeded. ERROR' (true)
+4. Parser handles both 'stream: ... ERROR' and direct '... ERROR' formats without throwing or misclassifying as CLEAN.
+5. Fail-closed contract: An oversized artifact that exceeds engine limits is treated as an engine ERROR / non-clean.

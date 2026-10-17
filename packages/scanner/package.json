@@ -10,6 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@prometheus-io/client": "^0.16.1",
     "@sug/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.6"
   }
 }

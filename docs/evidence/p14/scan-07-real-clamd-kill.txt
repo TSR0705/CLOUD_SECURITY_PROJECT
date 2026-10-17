@@ -1,0 +1,41 @@
+=== SCAN-07: Real sug-clamav Container Kill Evidence ===
+Test Case: scan-07-real-clamd-kill
+Target: Real sug-clamav Docker container (clamav/clamav:1.4.6)
+Scenario: ClamAV daemon killed mid-stream during an active INSTREAM scan session
+
+Step-by-step Trace & Verification:
+
+1. Initial Health Verification:
+   $ docker exec sug-clamav clamdcheck.sh
+   Output: Clamd is up
+   scanner.ping() result: true
+   Verification: clamd was healthy and ready prior to scan initiation.
+
+2. Active Scan Initiation:
+   Stream transmission started with controlled pacing (64 KB slices).
+   Chunks transmitted into clamd INSTREAM session: 5 chunks (320 KB) actively sent and acknowledged by TCP socket.
+   Scan state: ACTIVELY TRANSMITTING
+
+3. Abrupt Process Termination:
+   Command: docker kill sug-clamav
+   Action: Terminated real ClamAV daemon mid-scan.
+
+4. Scanner Error Detection & Result:
+   Result received:
+   {
+     "status": "ERROR",
+     "signature": null,
+     "durationMs": 380,
+     "error": "ClamAV socket error: write ECONNABORTED"
+   }
+
+5. Assertions Verified:
+   - result.status === 'ERROR' (true)
+   - result.status !== 'CLEAN' (true)
+   - result.error is defined (true)
+   - Fail-closed principle: Killing the scanner daemon mid-scan NEVER results in CLEAN.
+
+6. Container Recovery:
+   Command: docker start sug-clamav
+   Recovery: Healthy within 12 seconds (clamdcheck.sh -> 'Clamd is up')
+   sug-clamav container left fully operational and healthy for subsequent operations.

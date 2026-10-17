@@ -1,0 +1,21 @@
+=== SCAN-01: EICAR Standard Antivirus Test Signature Evidence ===
+Test Case: scan-01 (Detection of runtime-assembled EICAR test signature)
+Engine: ClamAV 1.4.6 (container sug-clamav)
+Protocol: INSTREAM (zINSTREAM\0, chunk-framed, 4-byte terminator)
+Payload: Dynamically assembled 68-byte EICAR sequence (no static signature in Git)
+
+Execution Output:
+{
+  "status": "FOUND",
+  "signature": "Eicar-Test-Signature",
+  "rawResponse": "stream: Eicar-Test-Signature FOUND",
+  "durationMs": 6,
+  "error": null
+}
+
+Verification Invariants:
+1. status === 'FOUND' (true)
+2. status !== 'CLEAN' (true)
+3. signature === 'Eicar-Test-Signature' (true)
+4. rawResponse matches /stream: (.+) FOUND$/ (true)
+5. Worker scan_results outcome: 'FAIL', reason_code: 'MALWARE_DETECTED', severity: 'CRITICAL', confidence: 'CONFIRMED'

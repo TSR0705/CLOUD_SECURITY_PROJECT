@@ -1,0 +1,48 @@
+=== Phase P14 Test Suite Summary ===
+Timestamp: 2026-09-29T17:24:36Z
+Command: pnpm vitest run tests/unit/scanner/ tests/integration/scanner/p14-clamav.test.ts
+
+ RUN  v5.0.1 C:/Users/ACER/Desktop/CLOUD_SECURITY_PROJECT
+
+ ✓ tests/integration/scanner/p14-clamav.test.ts (10 tests)
+   ✓ Phase P14: ClamAV Integration & EICAR Scanning (DoD Test Suite) (10)
+     ✓ scan-01: detects runtime-assembled EICAR test signature as FOUND
+     ✓ scan-02: returns CLEAN and stream: OK for benign clean payload
+     ✓ scan-07: fails closed with ERROR when clamd connection is aborted mid-scan (mock TCP)
+     ✓ scan-07-real-clamd-kill: fails closed (ERROR / not CLEAN) when real sug-clamav container is killed during active scan
+     ✓ scan-09: fails closed (ERROR / non-clean) when stream exceeds configured StreamMaxLength (55M)
+     ✓ scan-10: fails closed with ERROR when clamd is unavailable or port is unreachable
+     ✓ scan-sig-age: retrieves signature database version and computes age in seconds
+     ✓ scan-sig-age-gauge: exposes clamav_signature_age_seconds Prometheus gauge reflecting actual ClamAV database publication timestamp
+     ✓ scan-worker-clean: worker scans benign artifact, writes PASS finding, and completes job
+     ✓ scan-worker-eicar: worker scans EICAR artifact, writes MALWARE_DETECTED finding, and completes scan execution
+ ✓ tests/unit/scanner/clamav.test.ts (19 tests)
+   ✓ ClamAV INSTREAM Protocol & Client Unit Tests (19)
+     ✓ formatChunkHeader creates correct 4-byte big-endian length prefix
+     ✓ CHUNK_TERMINATOR is exactly 4 null bytes
+     ✓ INSTREAM_COMMAND is 'zINSTREAM\0'
+     ✓ parseClamAvResponse parses CLEAN response correctly
+     ✓ parseClamAvResponse parses FOUND malware response with signature name
+     ✓ parseClamAvResponse parses ERROR response correctly
+     ✓ parseClamAvResponse parses INSTREAM size limit exceeded as ERROR
+     ✓ parseClamAvResponse handles malformed or unexpected responses fail-closed
+     ✓ parseClamAvVersion extracts version, dbVersion, and dbDate correctly
+     ✓ parseClamAvVersion handles invalid version string safely
+     ✓ scanStream successfully scans a clean stream with mock clamd server
+     ✓ scanStream successfully identifies malware with mock clamd server
+     ✓ scanStream fails closed when connection is terminated abruptly mid-stream
+     ✓ scanStream respects scan timeout and fails closed
+     ✓ scanStream fails closed when clamd cannot be reached
+     ✓ getSignatureAge calculates signature age in seconds correctly
+     ✓ getSignatureAge returns available: false when version query fails
+     ✓ creates clamav_signature_age_seconds gauge and exposes Prometheus metric
+     ✓ sets clamav_signature_age_seconds gauge to NaN when clamd is unreachable (never 0)
+
+ Test Files  2 passed (2)
+      Tests  29 passed (29)
+
+Full Repository Test Suite Run:
+Test Files: 42 passed (42)
+Tests: 571 passed (571)
+Duration: 46.99s
+Zero regressions across all P0–P13 suites.

@@ -1,0 +1,18 @@
+=== ClamAV Signature Age Metric (Prometheus Exposition) ===
+Metric Name: clamav_signature_age_seconds
+Metric Type: Gauge
+Client: @prometheus-io/client 0.16.1
+Source: ClamAV 1.4.6 VERSION TCP command parsed database publication timestamp
+Timestamp: 2026-09-29T17:21:49Z
+
+Prometheus Exposition Output:
+# HELP clamav_signature_age_seconds Age of ClamAV virus signature database in seconds
+# TYPE clamav_signature_age_seconds gauge
+clamav_signature_age_seconds 59134
+
+Verification Invariants:
+1. Metric Name: clamav_signature_age_seconds (conforms to Prometheus metric naming conventions)
+2. Metric Type: Gauge
+3. Value: 59134 (represents current_time - ClamAV CVD publication timestamp in seconds, strictly >= 0)
+4. Dynamic Scraping: On scrape, the gauge invokes ClamAvScanner.getSignatureAge() via its asynchronous collect() hook.
+5. Fail-Closed / Unavailable Semantics: If clamd is unreachable or the database timestamp cannot be determined, the metric is set to NaN (never silently 0 or a fake timestamp).

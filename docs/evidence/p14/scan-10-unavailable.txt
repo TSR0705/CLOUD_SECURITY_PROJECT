@@ -1,0 +1,18 @@
+=== SCAN-10: ClamAV Daemon Unavailable / Port Unreachable Evidence ===
+Test Case: scan-10 (Service down, port unreachable, connection refused)
+Scenario: clamd daemon crashed, unreachable, or bad port specified
+
+Execution Output:
+{
+  "status": "ERROR",
+  "signature": null,
+  "durationMs": 1,
+  "error": "ClamAV socket error: connect ECONNREFUSED 127.0.0.1:59999"
+}
+
+Verification Invariants:
+1. status === 'ERROR' (true)
+2. status !== 'CLEAN' (true)
+3. Fail-closed contract: Unreachable malware engine NEVER permits an upload to pass.
+4. Error message captures specific OS socket error (ECONNREFUSED / ETIMEDOUT).
+5. Worker handles error by failing job via failScanJob with exponential backoff.

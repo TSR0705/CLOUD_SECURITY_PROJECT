@@ -22,6 +22,7 @@ import {
 } from '@sug/shared';
 import type { StorageProvider } from '@sug/storage';
 import { VersionMissing, NotFound, InvalidRequest } from '@sug/storage';
+import { ClamAvScanner, type ClamAvScanResult } from '@sug/scanner';
 
 export {
   DEFAULT_LEASE_TIMEOUT_MS,
@@ -42,6 +43,8 @@ export interface ScannerLogger {
 export interface ScannerWorkerOptions {
   db: DatabaseExecutor;
   storageProvider: StorageProvider;
+  clamavScanner?: ClamAvScanner;
+  enableClamAv?: boolean;
   workerId?: string;
   leaseTimeoutMs?: number;
   pollIntervalMs?: number;
@@ -55,6 +58,7 @@ export interface ScannerWorkerOptions {
 export interface ProcessJobResult {
   success: boolean;
   verified: boolean;
+  clamav?: ClamAvScanResult;
   sha256?: string;
   size?: number;
   error?: string;
@@ -64,6 +68,8 @@ export class ScannerWorker {
   readonly workerId: string;
   readonly leaseTimeoutMs: number;
   readonly reaperIntervalMs: number;
+  readonly clamavScanner?: ClamAvScanner | undefined;
+  readonly enableClamAv: boolean;
   private readonly db: DatabaseExecutor;
   private readonly storageProvider: StorageProvider;
   private readonly pollIntervalMs: number;
@@ -84,6 +90,17 @@ export class ScannerWorker {
     this.workerId = options.workerId ?? generateWorkerId();
     this.leaseTimeoutMs = options.leaseTimeoutMs ?? DEFAULT_LEASE_TIMEOUT_MS;
     this.pollIntervalMs = options.pollIntervalMs ?? 1000;
+
+    if (
+      options.enableClamAv ||
+      (options.enableClamAv === undefined && options.clamavScanner !== undefined)
+    ) {
+      this.clamavScanner = options.clamavScanner ?? new ClamAvScanner();
+      this.enableClamAv = true;
+    } else {
+      this.clamavScanner = undefined;
+      this.enableClamAv = false;
+    }
 
     const rawReaperInterval =
       options.reaperIntervalMs ??
@@ -357,7 +374,150 @@ export class ScannerWorker {
         ],
       );
 
-      // 7. Transition job to SUCCEEDED
+      // 7. If ClamAV scanning is enabled, scan local staged artifact via INSTREAM
+      if (this.enableClamAv && this.clamavScanner) {
+        this.logger.info('Invoking ClamAV INSTREAM scan', { jobId: job.id });
+        const clamStream = fs.createReadStream(localArtifactPath);
+        const clamavResult = await this.clamavScanner.scanStream(clamStream);
+
+        if (clamavResult.status === 'CLEAN') {
+          await this.db.query(
+            `INSERT INTO scan_results (
+               scan_job_id, file_version_id, check_id, engine, engine_version,
+               outcome, reason_code, severity, confidence, evidence,
+               scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+             ) VALUES (
+               $1, $2, 'scanner.clamav', 'clamav', '1.4.6',
+               'PASS', 'CLEAN', 'INFO', 'CONFIRMED', $3::jsonb,
+               $4, $5, $6, $7
+             )`,
+            [
+              job.id,
+              job.fileVersionId,
+              JSON.stringify({
+                status: 'CLEAN',
+                rawResponse: clamavResult.rawResponse,
+              }),
+              storageVersionId,
+              Buffer.from(calculatedSha256, 'hex'),
+              calculatedSize,
+              clamavResult.durationMs,
+            ],
+          );
+
+          await completeScanJob(this.db, job.id, {
+            workerId: this.workerId,
+            now: this.now,
+          });
+
+          this.logger.info('Scan job passed ClamAV scan', {
+            jobId: job.id,
+            durationMs: clamavResult.durationMs,
+          });
+
+          return {
+            success: true,
+            verified: true,
+            clamav: clamavResult,
+            sha256: calculatedSha256,
+            size: calculatedSize,
+          };
+        } else if (clamavResult.status === 'FOUND') {
+          this.logger.warn('ClamAV detected malware signature', {
+            jobId: job.id,
+            signature: clamavResult.signature,
+          });
+
+          await this.db.query(
+            `INSERT INTO scan_results (
+               scan_job_id, file_version_id, check_id, engine, engine_version,
+               outcome, reason_code, severity, confidence, evidence,
+               scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+             ) VALUES (
+               $1, $2, 'scanner.clamav', 'clamav', '1.4.6',
+               'FAIL', 'MALWARE_DETECTED', 'CRITICAL', 'CONFIRMED', $3::jsonb,
+               $4, $5, $6, $7
+             )`,
+            [
+              job.id,
+              job.fileVersionId,
+              JSON.stringify({
+                status: 'FOUND',
+                signature: clamavResult.signature,
+                rawResponse: clamavResult.rawResponse,
+              }),
+              storageVersionId,
+              Buffer.from(calculatedSha256, 'hex'),
+              calculatedSize,
+              clamavResult.durationMs,
+            ],
+          );
+
+          // Job completed execution; malware finding recorded for future decision engine
+          await completeScanJob(this.db, job.id, {
+            workerId: this.workerId,
+            now: this.now,
+          });
+
+          return {
+            success: true,
+            verified: true,
+            clamav: clamavResult,
+            sha256: calculatedSha256,
+            size: calculatedSize,
+          };
+        } else {
+          // ClamAV scanner ERROR: fail closed
+          this.logger.error('ClamAV scan failed with error', {
+            jobId: job.id,
+            error: clamavResult.error,
+          });
+
+          await this.db.query(
+            `INSERT INTO scan_results (
+               scan_job_id, file_version_id, check_id, engine, engine_version,
+               outcome, reason_code, severity, confidence, evidence,
+               scanned_storage_version_id, scanned_sha256, scanned_size, duration_ms
+             ) VALUES (
+               $1, $2, 'scanner.clamav', 'clamav', '1.4.6',
+               'ERROR', 'SCANNER_ERROR', 'HIGH', 'CONFIRMED', $3::jsonb,
+               $4, $5, $6, $7
+             )`,
+            [
+              job.id,
+              job.fileVersionId,
+              JSON.stringify({
+                status: 'ERROR',
+                error: clamavResult.error,
+                rawResponse: clamavResult.rawResponse,
+              }),
+              storageVersionId,
+              Buffer.from(calculatedSha256, 'hex'),
+              calculatedSize,
+              clamavResult.durationMs,
+            ],
+          );
+
+          const scanError = new Error(clamavResult.error || 'ClamAV scanner error');
+          await failScanJob(this.db, job.id, {
+            workerId: this.workerId,
+            error: scanError,
+            retryable: true,
+            now: this.now,
+          });
+
+          return {
+            success: false,
+            verified: true,
+            clamav: clamavResult,
+            sha256: calculatedSha256,
+            size: calculatedSize,
+            error: scanError.message,
+          };
+        }
+      }
+
+      // 8. Transition job to SUCCEEDED (baseline skeleton / compatibility mode)
       await completeScanJob(this.db, job.id, {
         workerId: this.workerId,
         now: this.now,

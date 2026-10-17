@@ -14,3 +14,7 @@ export const ScannerInfo: ScannerInfo = {
   name: ScannerPackageName,
   version: '0.1.0',
 };
+
+export * from './clamav.js';
+export * from './metrics.js';
+export { Registry, Gauge } from '@prometheus-io/client';
