@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../services/api/dist/app.js';
 
@@ -57,7 +58,10 @@ async function main() {
     secrets: {
       pepper: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       kek: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      jwtPrivateKey: 'dummy',
+      jwtPrivateKey: crypto.generateKeyPairSync('ed25519', {
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      }).privateKey,
       checkpointPrivateKey: 'dummy',
     },
     toRedacted: () => ({}),

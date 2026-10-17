@@ -18,7 +18,8 @@ describe('PostgreSQL Schema & Security Invariants (DB-01 to DB-30)', () => {
 
   it('DB-01: Migration succeeds from an empty database and records pgmigrations', async () => {
     const res = await pool.query('SELECT count(*)::int as count FROM pgmigrations');
-    expect(res.rows[0].count).toBe(9);
+    // 9 P3 base migrations + 1 P7 dashboard auth grants migration (010)
+    expect(res.rows[0].count).toBe(10);
   });
 
   it('DB-02: All 16 required tables exist', async () => {
@@ -340,6 +341,32 @@ describe('PostgreSQL Schema & Security Invariants (DB-01 to DB-30)', () => {
       // 16 tables + 1 pgmigrations
       expect(tblRes.rows[0].count).toBe(17);
       await testPool.end();
+
+      // Verify P7 least-privilege grants for sug_api on the fresh database
+      const apiDbUrl = getDbUrl('sug_api', 'sug_api_dev_password', testDb);
+      const apiPool = new pg.Pool({ connectionString: apiDbUrl });
+
+      // sug_api can select from users and refresh_tokens
+      const userCountRes = await apiPool.query('SELECT count(*)::int as count FROM users');
+      expect(userCountRes.rows[0].count).toBe(0);
+
+      const tokenCountRes = await apiPool.query(
+        'SELECT count(*)::int as count FROM refresh_tokens',
+      );
+      expect(tokenCountRes.rows[0].count).toBe(0);
+
+      // sug_api cannot delete from users or refresh_tokens
+      await expect(apiPool.query('DELETE FROM users')).rejects.toThrow(/permission denied/);
+      await expect(apiPool.query('DELETE FROM refresh_tokens')).rejects.toThrow(
+        /permission denied/,
+      );
+
+      // sug_api cannot update sensitive columns on users (e.g. password_hash or role)
+      await expect(apiPool.query(`UPDATE users SET password_hash = 'tampered'`)).rejects.toThrow(
+        /permission denied/,
+      );
+
+      await apiPool.end();
     } finally {
       await client.query(`DROP DATABASE IF EXISTS ${testDb}`);
       client.release();
