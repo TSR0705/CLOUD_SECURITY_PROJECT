@@ -5,6 +5,12 @@ import { Readable } from 'node:stream';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
+import {
+  S3Client,
+  HeadBucketCommand,
+  CreateBucketCommand,
+  PutBucketVersioningCommand,
+} from '@aws-sdk/client-s3';
 import { createApp } from '../../../services/api/src/app.js';
 import { ApiKeyService } from '../../../services/api/src/auth/service.js';
 import { loadConfig } from '@sug/shared/config';
@@ -30,6 +36,39 @@ describe('Phase P10: Streaming Upload and Resource Limits (DoD Test Suite)', () 
 
     config = loadConfig({ secretsDir });
     adminPool = createPool('sug_admin', 'sug_dev_password');
+
+    // Ensure S3 quarantine bucket exists with versioning enabled (with retry for emulator readiness)
+    const rawS3 = new S3Client({
+      endpoint: config.storage.s3.endpoint || 'http://localhost:4566',
+      region: config.storage.s3.region || 'us-east-1',
+      credentials: {
+        accessKeyId: config.storage.services.api.accessKeyId || 'test',
+        secretAccessKey:
+          config.secrets.services?.api?.secretAccessKey ??
+          config.secrets.awsSecretAccessKey ??
+          'test',
+      },
+      forcePathStyle: true,
+    });
+
+    for (let attempt = 0; attempt < 15; attempt++) {
+      try {
+        try {
+          await rawS3.send(new HeadBucketCommand({ Bucket: config.storage.s3.quarantineBucket }));
+        } catch {
+          await rawS3.send(new CreateBucketCommand({ Bucket: config.storage.s3.quarantineBucket }));
+        }
+        await rawS3.send(
+          new PutBucketVersioningCommand({
+            Bucket: config.storage.s3.quarantineBucket,
+            VersioningConfiguration: { Status: 'Enabled' },
+          }),
+        );
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
 
     // 1. Create test user and application
     const userRes = await adminPool.query(
