@@ -1,0 +1,57 @@
+=== P20 TOCTOU ADVERSARIAL VERIFICATION EVIDENCE ===
+Date: 2026-10-17
+Branch: phase/20-bound-promotion
+Target: Secure Upload Gateway Phase P20 — Exact-Artifact Promotion & Anti-TOCTOU Protection
+
+[TEST CASE: toctou-01]
+Description: Legitimate clean file promotion end-to-end.
+Procedure:
+  1. Retrieve exact bound version from quarantine via getByVersion({ bucket, key, versionId }).
+  2. Verify recomputed SHA-256 and byte size against security decision tuple.
+  3. Encrypt verified plaintext via AES-256-GCM envelope encryption (@sug/crypto).
+  4. Write ciphertext envelope to clean storage (objects/<app_id>/<file_id>) via putIfAbsent (If-None-Match: *).
+  5. Atomically commit cloud_objects (zone='clean'), files.status='PROMOTED', promotion_jobs.status='SUCCEEDED', and audit_append('FILE_PROMOTED').
+Result: PASS
+Status: PROMOTED
+Plaintext SHA-256 verified: YES
+Ciphertext SHA-256 verified: YES
+Audit event logged: FILE_PROMOTED
+
+[TEST CASE: toctou-02]
+Description: Source object replaced in quarantine (newer object version uploaded).
+Procedure:
+  1. File in quarantine receives new upload under same key, producing version 'q-ver-002'.
+  2. Security decision is bound strictly to version 'q-ver-001'.
+  3. Promoter explicitly invokes getByVersion({ versionId: 'q-ver-001' }), never falling back to latest.
+  4. Missing or superseded version causes immediate abort, transition to ERROR, and zero clean storage writes.
+Result: PASS
+Status: STORAGE_FAILED / VersionMissing
+Clean storage written: NO (0 bytes written)
+Encryption attempted: NO
+
+[TEST CASE: toctou-03]
+Description: Content mutated under same version (corrupted source / compromised storage).
+Procedure:
+  1. Quarantine source payload content altered, retaining version ID.
+  2. Promoter recomputes SHA-256 digest over fetched stream before encryption.
+  3. Timing-safe comparison timingSafeSha256Equal detects mismatch with bound tuple SHA-256.
+  4. Immediate fail-closed abort: files.status -> 'BLOCKED', audit_append('PROMOTION_REJECTED'), promotion_jobs.status -> 'FAILED'.
+Result: PASS
+Status: HASH_MISMATCH
+Clean storage written: NO (0 bytes written)
+Encryption attempted: NO
+File blocked: YES (status = 'BLOCKED')
+Audit event logged: PROMOTION_REJECTED (reason: 'HASH_MISMATCH')
+
+[TEST CASE: toctou-04]
+Description: Size mismatch / payload truncation.
+Procedure:
+  1. Quarantine source payload truncated (size < bound size) or altered length.
+  2. Recomputed byte size does not match bound size in decision tuple.
+  3. Immediate fail-closed abort: files.status -> 'BLOCKED', audit_append('PROMOTION_REJECTED').
+Result: PASS
+Status: SIZE_MISMATCH
+Clean storage written: NO (0 bytes written)
+Encryption attempted: NO
+File blocked: YES (status = 'BLOCKED')
+Audit event logged: PROMOTION_REJECTED (reason: 'SIZE_MISMATCH')

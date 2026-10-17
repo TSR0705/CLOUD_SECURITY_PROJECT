@@ -4301,6 +4301,832 @@
           }
         }
       }
+    },
+    "/api/v1/files/{id}": {
+      "get": {
+        "summary": "Download a promoted clean file",
+        "tags": ["Files"],
+        "description": "Retrieves and decrypts a promoted artifact from trusted clean storage with verify-before-release integrity checks.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "File UUID"
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a file",
+        "tags": ["Files"],
+        "description": "Soft-deletes a file record and appends a FILE_DELETED audit event.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "File UUID"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "File deleted successfully"
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/{id}": {
+      "get": {
+        "summary": "Download a promoted clean file",
+        "tags": ["Files"],
+        "description": "Retrieves and decrypts a promoted artifact from trusted clean storage with verify-before-release integrity checks.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "File UUID"
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a file",
+        "tags": ["Files"],
+        "description": "Soft-deletes a file record and appends a FILE_DELETED audit event.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "File UUID"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "File deleted successfully"
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "example": "urn:sug:error:validation"
+                    },
+                    "title": {
+                      "type": "string",
+                      "example": "Validation Error"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "example": 400
+                    },
+                    "detail": {
+                      "type": "string",
+                      "example": "Invalid parameter"
+                    },
+                    "instance": {
+                      "type": "string",
+                      "example": "/api/v1/files/018f3a5e-7a42-7000-8000-000000000001"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "example": "018f3a5e-7a42-7000-8000-000000000001"
+                    }
+                  },
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "servers": [

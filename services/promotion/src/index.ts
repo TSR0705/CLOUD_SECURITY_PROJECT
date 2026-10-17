@@ -14,3 +14,7 @@ export const Service_PromotionInfo: Service_PromotionInfo = {
   name: Service_PromotionPackageName,
   version: '0.1.0',
 };
+
+export * from './types.js';
+export * from './promoter.js';
+export * from './worker.js';

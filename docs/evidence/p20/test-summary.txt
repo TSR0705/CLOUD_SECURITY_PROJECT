@@ -1,0 +1,64 @@
+=== PHASE P20 TEST SUMMARY ===
+Date: 2026-10-17
+Branch: phase/20-bound-promotion
+Target: Secure Upload Gateway Phase P20 — Trusted Storage and Exact-Artifact Promotion
+
+Test Suites:
+1. tests/unit/promotion/promotion.test.ts (13 tests)
+   - 1. toctou-01: Legitimate Clean File Promotion End-to-End
+     * fetches bound version, encrypts with SUG1, writes clean storage, and atomically audits
+   - 2. toctou-02: Source Object Replaced in Quarantine (Version Binding)
+     * rejects promotion and transitions file to ERROR if bound version is missing
+   - 3. toctou-03: Content Mutated Under Same Version (SHA-256 Mismatch)
+     * aborts immediately with HASH_MISMATCH, blocks file, audits rejection, and never writes clean object
+   - 4. toctou-04: Size Mismatch or Truncated Payload Rejection
+     * aborts immediately with SIZE_MISMATCH when payload length does not match bound size
+     * triggers exact SIZE_MISMATCH when size differs but hash is artificially matched in test fixture
+   - 5. Non-ALLOW and Superseded Decision Rejection
+     * rejects promotion when decision is BLOCK
+     * rejects promotion when decision is QUARANTINE
+     * rejects promotion when decision is superseded by a subsequent review or scan
+   - 6. Fail-Closed on Key Provider / Encryption Error
+     * halts immediately before clean storage write when key provider throws
+   - 7. Clean Storage Write Idempotency and Collision Handling
+     * handles AlreadyExists idempotently if existing clean object ciphertext hash matches
+     * fails with ALREADY_EXISTS if pre-existing clean object has conflicting ciphertext hash
+   - 8. Atomic Rollback and Cleanup on Audit Append Failure
+     * rolls back database transaction and cleans up written clean storage object when audit fails
+   - 9. PromotionWorker Batch Claiming and Polling
+     * processes eligible claimed jobs and completes when queue is drained
+
+2. tests/unit/api/files.test.ts (18 tests)
+   - 1. GET /files/:id — Verify-Before-Release & Safe Headers
+     * decrypts verified clean object and streams plaintext with all security headers
+     * works identically via canonical /api/v1/files/:id path
+     * allows admin and analyst dashboard users to download promoted clean objects
+     * allows auditor dashboard users to download promoted clean objects
+   - 2. Verify-Before-Release: Tampered Ciphertext Rejection
+     * fails closed (500) and leaks zero plaintext when clean ciphertext envelope is tampered
+     * fails closed when auth tag is corrupted
+   - 3. Tenant Isolation & Access Control (authz-07)
+     * rejects cross-tenant download attempt (403 Forbidden)
+     * rejects cross-tenant delete attempt (403 Forbidden)
+   - 4. Status Guards & Non-Promoted Files
+     * returns 400 when attempting to download a QUARANTINED file
+     * returns 400 when attempting to download a BLOCKED file
+     * returns 404 Not Found when file has been soft deleted
+   - 5. DELETE /files/:id — Soft Delete & RBAC
+     * allows application owner API key to soft delete file
+     * allows admin users to delete files
+     * rejects analyst users from deleting files (403 Forbidden)
+     * returns 404 when deleting a non-existent file
+     * returns 204 idempotently when deleting an already deleted file
+   - 6. Authentication Failure Modes
+     * returns 401 when Authorization header is missing
+     * returns 401 when API key is invalid
+
+Summary Totals:
+  P20 Test Files: 2 passed (2)
+  P20 Tests: 31 passed (31)
+  Full Monorepo Unit Test Suite: 45 passed (45 test files, 726 tests passed)
+  TypeScript Typecheck: 0 errors (tsc -b clean)
+  ESLint: 0 errors, 0 warnings (eslint . clean)
+  Prettier: All files match code style
+  OpenAPI Schema: docs/openapi.json in sync and validated
