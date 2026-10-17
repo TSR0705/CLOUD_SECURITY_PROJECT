@@ -13,6 +13,11 @@
     "@sug/shared": "workspace:*",
     "@sug/scanner": "workspace:*",
     "@sug/security-engine": "workspace:*",
-    "@sug/storage": "workspace:*"
+    "@sug/storage": "workspace:*",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.6",
+    "@types/pg": "8.23.1"
   }
 }
