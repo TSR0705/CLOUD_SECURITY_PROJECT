@@ -1,0 +1,110 @@
+================================================================================
+PHASE P19 TEST SUMMARY & VERIFICATION REPORT
+================================================================================
+Timestamp: 2026-10-17T07:50:00Z
+Phase: P19 - AES-256-GCM Envelope Encryption & Key Management
+Package: packages/crypto (@sug/crypto)
+Target Format: SUG1 Binary Envelope (ADR-0010 Section 1)
+Baseline Commit: 06794bf2fcfb17d5002ed3d5ea539f5df935ad54
+Branch: phase/19-envelope-encryption
+
+--------------------------------------------------------------------------------
+1. PACKAGES/CRYPTO COVERAGE REPORT
+--------------------------------------------------------------------------------
+Command: pnpm vitest run tests/unit/crypto/ --coverage
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |    91.2 |    86.73 |     100 |    91.2 |                   
+ src               |   96.75 |    92.07 |     100 |   96.75 |                   
+  aad.ts           |     100 |      100 |     100 |     100 |                   
+  cipher.ts        |   92.98 |    88.23 |     100 |   92.98 | 77-84,181         
+  constants.ts     |     100 |      100 |     100 |     100 |                   
+  envelope.ts      |     100 |    90.62 |     100 |     100 | 103,109,127       
+  errors.ts        |     100 |      100 |     100 |     100 |                   
+  index.ts         |     100 |      100 |     100 |     100 |                   
+ src/providers     |   84.03 |    81.05 |     100 |   84.03 |                   
+  kms-provider.ts  |    93.1 |    85.18 |     100 |    93.1 | 67,93             
+  ...l-provider.ts |   81.11 |    79.41 |     100 |   81.11 | ...75-179,220,244 
+  provider.ts      |     100 |      100 |     100 |     100 |                   
+-------------------|---------|----------|---------|---------|-------------------
+
+Result: 8 test files passed (8), 73 tests passed (73).
+Statements: 91.2%, Functions: 100%, Branch: 86.73%, Lines: 91.2%.
+
+--------------------------------------------------------------------------------
+2. DoD SUITE BREAKDOWN (crypto-01 to crypto-04)
+--------------------------------------------------------------------------------
+1. tests/unit/crypto/crypto-01-envelope.test.ts (7 tests) - PASS
+   - SUG1 binary envelope structure (magic, version, nonce, wrapped DEK length, auth tag)
+   - Plaintext round-trip decryption
+   - Fresh DEK, nonce, and ciphertext per run
+   - Zero-byte empty buffer support
+   - Large payload (1 MB binary) support
+   - snake_case database model interop
+   - EncryptedObject input support
+
+2. tests/unit/crypto/crypto-02-verify-before-release.test.ts (8 tests) - PASS
+   - Tampered ciphertext rejection (AuthenticationError)
+   - Tampered auth tag rejection (AuthenticationError)
+   - Truncated ciphertext rejection (AuthenticationError)
+   - Corrupted magic rejection (InvalidMagicError)
+   - Unsupported version rejection (UnsupportedVersionError)
+   - Undersized envelope buffer rejection (InvalidEnvelopeError)
+   - Header overflow/underflow bounds validation (InvalidEnvelopeError)
+   - Zero plaintext leakage guarantee on authentication failure
+
+3. tests/unit/crypto/crypto-03-aad-binding.test.ts (11 tests) - PASS
+   - Altered appId rejection (AuthenticationError)
+   - Altered fileId rejection (AuthenticationError)
+   - Altered storageVersionId rejection (AuthenticationError)
+   - Altered sha256Plaintext rejection (AuthenticationError)
+   - Missing/empty field validations (InvalidAadError)
+   - Hex prefix (0x, \x) and case insensitivity normalization
+   - Length-prefixed binary delimiter-collision prevention
+
+4. tests/unit/crypto/crypto-04-key-management.test.ts (13 tests) - PASS
+   - RFC 3394 AES-256 Key Wrap (32 bytes DEK -> 40 bytes wrapped key)
+   - Invalid KEK length rejection (KeyProviderError)
+   - Invalid DEK length rejection on wrap and unwrap (KeyProviderError)
+   - Wrong KEK rejection on unwrap (KeyProviderError)
+   - Secret file KEK loading (Docker secrets)
+   - Environment variable KEK loading (SUG_KEK)
+   - Missing key reference rejection (KeyProviderError)
+   - KmsKeyProvider live mode fail-closed (KeyProviderError)
+   - KmsKeyProvider mock mode wrap/unwrap roundtrip
+   - End-to-end KMS envelope encryption & decryption
+   - Mismatched KMS key reference rejection
+
+5. tests/unit/crypto/nonce-uniqueness.test.ts (2 tests) - PASS
+   - 10,000-iteration empirical CSPRNG nonce check: 10,000 unique nonces, 0 collisions
+   - Multi-run high-level encryptBuffer nonce uniqueness check
+
+6. tests/unit/crypto/test-vectors.test.ts (11 tests) - PASS
+   - 3 positive test vectors from packages/crypto/test-vectors/sug1-vectors.json
+   - 8 negative test vectors covering all error categories
+
+7. tests/unit/crypto/security-invariants.test.ts (10 tests) - PASS
+   - Invariants 1-10 verified with automated assertions
+
+8. tests/unit/crypto/edge-cases.test.ts (11 tests) - PASS
+   - Defensive type checks, parameter checks, index exports, secretsDir lookup
+
+--------------------------------------------------------------------------------
+3. MONOREPO UNIT TEST REGRESSION CHECK
+--------------------------------------------------------------------------------
+Command: pnpm vitest run tests/unit/
+Test Files: 43 passed (43)
+Tests:      685 passed (685)
+Failures:   0
+Regressions: 0 (All P1 through P18 unit tests remain green)
+
+--------------------------------------------------------------------------------
+4. MONOREPO QUALITY GATES
+--------------------------------------------------------------------------------
+- Typecheck: pnpm typecheck (tsc -b) -> PASSED (0 errors)
+- Lint: pnpm lint (eslint .) -> PASSED (0 errors, 0 warnings)
+- Format: pnpm format:check (prettier --check .) -> PASSED (0 style issues)
+================================================================================

@@ -1,16 +1,14 @@
 /**
  * @sug/crypto
- * SUG1 envelope encryption and key provider contracts
+ * Public API for SUG1 AES-256-GCM envelope encryption, AAD identity binding, and key management.
  */
 
-export const CryptoPackageName = '@sug/crypto' as const;
-
-export interface CryptoInfo {
-  name: typeof CryptoPackageName;
-  version: string;
-}
-
-export const CryptoInfo: CryptoInfo = {
-  name: CryptoPackageName,
-  version: '0.1.0',
-};
+export * from './constants.js';
+export * from './errors.js';
+export type * from './types.js';
+export * from './aad.js';
+export * from './envelope.js';
+export * from './cipher.js';
+export * from './providers/provider.js';
+export * from './providers/local-provider.js';
+export * from './providers/kms-provider.js';
