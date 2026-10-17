@@ -1,0 +1,119 @@
+================================================================================
+PHASE P19 TEST SUMMARY & VERIFICATION REPORT
+================================================================================
+Timestamp: 2026-10-17T08:35:00Z
+Phase: P19 - AES-256-GCM Envelope Encryption & Key Management
+Package: packages/crypto (@sug/crypto)
+Target Format: SUG1 Binary Envelope (ADR-0010 Section 1)
+Baseline Commit: 06794bf2fcfb17d5002ed3d5ea539f5df935ad54
+Branch: phase/19-envelope-encryption
+
+--------------------------------------------------------------------------------
+1. PACKAGES/CRYPTO COVERAGE REPORT
+--------------------------------------------------------------------------------
+Command: pnpm vitest run tests/unit/crypto/ --coverage
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   90.54 |    86.44 |     100 |   90.54 |                   
+ src               |   95.32 |    90.26 |     100 |   95.32 |                   
+  aad.ts           |   96.66 |    97.05 |     100 |   96.66 | 41                
+  cipher.ts        |   91.42 |    86.36 |     100 |   91.42 | ...12,215,228-229 
+  constants.ts     |     100 |      100 |     100 |     100 |                   
+  envelope.ts      |   97.72 |    88.23 |     100 |   97.72 | 69                
+  errors.ts        |     100 |      100 |     100 |     100 |                   
+  index.ts         |     100 |      100 |     100 |     100 |                   
+ src/providers     |      84 |    82.17 |     100 |      84 |                   
+  kms-provider.ts  |   93.54 |    87.09 |     100 |   93.54 | 73,99             
+  ...l-provider.ts |   80.85 |       80 |     100 |   80.85 | ...79-183,224,248 
+  provider.ts      |     100 |      100 |     100 |     100 |                   
+-------------------|---------|----------|---------|---------|-------------------
+
+Result: 8 test files passed (8), 83 tests passed (83).
+Statements: 90.54%, Functions: 100%, Branch: 86.44%, Lines: 90.54%.
+
+--------------------------------------------------------------------------------
+2. DoD SUITE BREAKDOWN (crypto-01 to crypto-04)
+--------------------------------------------------------------------------------
+1. tests/unit/crypto/crypto-01-envelope.test.ts (7 tests) - PASS
+   - SUG1 binary envelope structure (magic, version, nonce, wrapped DEK length, auth tag)
+   - Plaintext round-trip decryption
+   - Fresh DEK, nonce, and ciphertext per run
+   - Zero-byte empty buffer support (75-byte standard envelope)
+   - Large payload (1 MB binary) support
+   - snake_case database model interop
+   - EncryptedObject input support
+
+2. tests/unit/crypto/crypto-02-verify-before-release.test.ts (12 tests) - PASS
+   - Tampered ciphertext rejection (AuthenticationError)
+   - Tampered auth tag rejection (AuthenticationError)
+   - Truncated ciphertext rejection (AuthenticationError)
+   - Corrupted magic rejection (InvalidMagicError)
+   - Unsupported version rejection (UnsupportedVersionError)
+   - Undersized envelope buffer rejection (InvalidEnvelopeError)
+   - Header overflow/underflow bounds validation (InvalidEnvelopeError)
+   - Zero plaintext leakage guarantee on authentication failure
+   - Plaintext digest verification failure rejection (AuthenticationError)
+   - Plaintext digest mismatch rejection at encryption time (InvalidAadError)
+   - Truncation testing across all boundary sizes (0, 1, 4, 18, 19, 35, 58, 74 bytes)
+   - Minimum wrapped DEK length < 40 rejection (InvalidEnvelopeError)
+
+3. tests/unit/crypto/crypto-03-aad-binding.test.ts (11 tests) - PASS
+   - Altered appId rejection (AuthenticationError)
+   - Altered fileId rejection (AuthenticationError)
+   - Altered storageVersionId rejection (AuthenticationError)
+   - Altered sha256Plaintext rejection (AuthenticationError)
+   - Missing/empty field validations (InvalidAadError)
+   - Hex prefix (0x, \x) and case insensitivity normalization
+   - Length-prefixed binary delimiter-collision prevention
+
+4. tests/unit/crypto/crypto-04-key-management.test.ts (15 tests) - PASS
+   - RFC 3394 AES-256 Key Wrap (32 bytes DEK -> 40 bytes wrapped key)
+   - Invalid KEK length rejection (KeyProviderError)
+   - Invalid DEK length rejection on wrap and unwrap (KeyProviderError)
+   - Wrong KEK rejection on unwrap (KeyProviderError)
+   - Secret file KEK loading (Docker secrets)
+   - Environment variable KEK loading (SUG_KEK)
+   - Missing key reference rejection (KeyProviderError)
+   - KmsKeyProvider live mode fail-closed (KeyProviderError)
+   - KmsKeyProvider mock mode wrap/unwrap roundtrip
+   - End-to-end KMS envelope encryption & decryption
+   - Mismatched KMS key reference rejection
+   - Production Guard: KmsKeyProvider mock mode strictly forbidden when NODE_ENV=production
+   - Path traversal attempt rejection under secretsDir
+
+5. tests/unit/crypto/nonce-uniqueness.test.ts (2 tests) - PASS
+   - 10,000-iteration empirical CSPRNG test using production @sug/crypto generator (0 collisions)
+   - Repeated encryptBuffer nonce uniqueness check
+
+6. tests/unit/crypto/test-vectors.test.ts (15 tests) - PASS
+   - Official IETF RFC 3394 Section 4.6 (256-bit KEK + 256-bit Key Data) standard vector
+   - Official NIST SP 800-38D Case 13 (AES-256-GCM zero plaintext, zero AAD)
+   - Official NIST SP 800-38D Case 14 (AES-256-GCM 16-byte plaintext)
+   - Positive test vectors from packages/crypto/test-vectors/sug1-vectors.json
+   - Negative test vectors covering all error categories
+
+7. tests/unit/crypto/security-invariants.test.ts (10 tests) - PASS
+   - Invariants 1-10 verified with automated assertions
+
+8. tests/unit/crypto/edge-cases.test.ts (11 tests) - PASS
+   - Defensive type checks, parameter checks, index exports, secretsDir lookup
+
+--------------------------------------------------------------------------------
+3. MONOREPO UNIT TEST REGRESSION CHECK
+--------------------------------------------------------------------------------
+Command: pnpm vitest run tests/unit/
+Test Files: 43 passed (43)
+Tests:      695 passed (695)
+Failures:   0
+Regressions: 0 (All P1 through P18 unit tests remain green)
+
+--------------------------------------------------------------------------------
+4. MONOREPO QUALITY GATES
+--------------------------------------------------------------------------------
+- Typecheck: pnpm typecheck (tsc -b) -> PASSED (0 errors)
+- Lint: pnpm lint (eslint .) -> PASSED (0 errors, 0 warnings)
+- Format: pnpm format:check (prettier --check .) -> PASSED (0 style issues)
+================================================================================

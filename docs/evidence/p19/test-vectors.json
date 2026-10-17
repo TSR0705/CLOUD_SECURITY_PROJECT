@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "description": "Canonical SUG1 test vectors for AES-256-GCM envelope encryption and RFC 3394 key wrap",
+  "positive": [
+    {
+      "id": "vec_pos_00_rfc3394_standard",
+      "description": "Official IETF RFC 3394 Section 4.6 test vector (256-bit KEK + 256-bit Key Data) and NIST SP 800-38D GCM payload",
+      "standardReference": "IETF RFC 3394 Section 4.6 & NIST SP 800-38D",
+      "kekHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "dekHex": "00112233445566778899aabbccddeeff000102030405060708090a0b0c0d0e0f",
+      "nonceHex": "0102030405060708090a0b0c",
+      "plaintextUtf8": "RFC3394 Section 4.6 and NIST SP 800-38D Conformance Test Payload.",
+      "plaintextHex": "524643333339342053656374696f6e20342e3620616e64204e495354205350203830302d33384420436f6e666f726d616e63652054657374205061796c6f61642e",
+      "aad": {
+        "appId": "app_rfc3394_std",
+        "fileId": "file_nist_gcm_01",
+        "storageVersionId": "v1_official_standard",
+        "sha256Plaintext": "881c21de0b4eab47cfbf1a7a431e084a24d38f168314b26c5d74a308ecf8d54e"
+      },
+      "wrappedDekHex": "28c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21",
+      "authTagHex": "aad01597f00eabff95a07fc314bfad19",
+      "ciphertextHex": "ff7c5fa298f3815474bd0a108cbfaf3f915de59bbebffeae8293195e1118b951187d943d0a12f3f93af44247c80f51514735e7732dcf1aa6129428fc52463d5891",
+      "serializedEnvelopeHex": "53554731010102030405060708090a0b0c002828c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21aad01597f00eabff95a07fc314bfad19ff7c5fa298f3815474bd0a108cbfaf3f915de59bbebffeae8293195e1118b951187d943d0a12f3f93af44247c80f51514735e7732dcf1aa6129428fc52463d5891"
+    },
+    {
+      "id": "vec_pos_01_ascii",
+      "description": "Standard ASCII sentence with known keys and AAD",
+      "kekHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "dekHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "nonceHex": "c0c1c2c3c4c5c6c7c8c9cacb",
+      "plaintextUtf8": "The quick brown fox jumps over the lazy dog.",
+      "plaintextHex": "54686520717569636b2062726f776e20666f78206a756d7073206f76657220746865206c617a7920646f672e",
+      "aad": {
+        "appId": "app_01j7v0q5m",
+        "fileId": "file_01j7v0q7k",
+        "storageVersionId": "ver_01j7v0q9p",
+        "sha256Plaintext": "ef537f25c895bfa782526529a9b63d97aa631564d5d789c2b765448c8635fb6c"
+      },
+      "wrappedDekHex": "d29fa348b506fb7c8df0ad97bd22b94a3ec5a9cc74787fb26eb58ffc9d91387901c82b4370386891",
+      "authTagHex": "3141f677debbd6fbe52456101b7a90d1",
+      "ciphertextHex": "18085ed34fb58be68566f1be9e137a8596a37b252e7603f905781bca8f0b2f941a510f0d4a48f03f1817673b",
+      "serializedEnvelopeHex": "5355473101c0c1c2c3c4c5c6c7c8c9cacb0028d29fa348b506fb7c8df0ad97bd22b94a3ec5a9cc74787fb26eb58ffc9d91387901c82b43703868913141f677debbd6fbe52456101b7a90d118085ed34fb58be68566f1be9e137a8596a37b252e7603f905781bca8f0b2f941a510f0d4a48f03f1817673b"
+    },
+    {
+      "id": "vec_pos_02_empty",
+      "description": "Zero-byte empty plaintext",
+      "kekHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "dekHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "nonceHex": "d0d1d2d3d4d5d6d7d8d9dadb",
+      "plaintextUtf8": "",
+      "plaintextHex": "",
+      "aad": {
+        "appId": "app_empty_01",
+        "fileId": "file_empty_02",
+        "storageVersionId": "ver_empty_03",
+        "sha256Plaintext": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "wrappedDekHex": "d29fa348b506fb7c8df0ad97bd22b94a3ec5a9cc74787fb26eb58ffc9d91387901c82b4370386891",
+      "authTagHex": "ba84bc45b7247fe83970d7ef58eb5e85",
+      "ciphertextHex": "",
+      "serializedEnvelopeHex": "5355473101d0d1d2d3d4d5d6d7d8d9dadb0028d29fa348b506fb7c8df0ad97bd22b94a3ec5a9cc74787fb26eb58ffc9d91387901c82b4370386891ba84bc45b7247fe83970d7ef58eb5e85"
+    },
+    {
+      "id": "vec_pos_03_binary",
+      "description": "256-byte binary payload (0x00 to 0xFF)",
+      "kekHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "dekHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "nonceHex": "e0e1e2e3e4e5e6e7e8e9eaeb",
+      "plaintextHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "aad": {
+        "appId": "app_bin_01",
+        "fileId": "file_bin_02",
+        "storageVersionId": "ver_bin_03",
+        "sha256Plaintext": "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880"
+      },
+      "wrappedDekHex": "d29fa348b506fb7c8df0ad97bd22b94a3ec5a9cc74787fb26eb58ffc9d91387901c82b4370386891",
+      "authTagHex": "fdf5ec534674d3aab3c769e52b69cd50",
+      "ciphertextHex": "a571476a9c22c861803273642a8effe5d7c41babda17de9a3841e5431b1961981be11144d4f5aba63a43d88523c0baaf31ab4d9ad6dfd3ce8f6d96f828b98ab764f11d70f5ec0ab28424e41cfb7223cebb21c8b55b91479d0e963db15b966266b7efbea721b27805c8ae8166df6a3bf0ad70cd592c484ceafc6c896792da92285b72f5afe43c9a1bd31a018bb5e77f33cab36c90377a6619561ec077e01b4465de2fff0a422efc690d1180e9dd916e03209f432aa365ef27c13e633a282aed59ae6078a6f13ca1193fbb6cef3aaad17e3c7f156615704d4861f9a14b5a057722f46f28f882ed973636e0da5da862c638d3929b98a802f358e66b939b431c47a4",
+      "serializedEnvelopeHex": "5355473101e0e1e2e3e4e5e6e7e8e9eaeb0028d29fa348b506fb7c8df0ad97bd22b94a3ec5a9cc74787fb26eb58ffc9d91387901c82b4370386891fdf5ec534674d3aab3c769e52b69cd50a571476a9c22c861803273642a8effe5d7c41babda17de9a3841e5431b1961981be11144d4f5aba63a43d88523c0baaf31ab4d9ad6dfd3ce8f6d96f828b98ab764f11d70f5ec0ab28424e41cfb7223cebb21c8b55b91479d0e963db15b966266b7efbea721b27805c8ae8166df6a3bf0ad70cd592c484ceafc6c896792da92285b72f5afe43c9a1bd31a018bb5e77f33cab36c90377a6619561ec077e01b4465de2fff0a422efc690d1180e9dd916e03209f432aa365ef27c13e633a282aed59ae6078a6f13ca1193fbb6cef3aaad17e3c7f156615704d4861f9a14b5a057722f46f28f882ed973636e0da5da862c638d3929b98a802f358e66b939b431c47a4"
+    }
+  ],
+  "negative": [
+    {
+      "id": "vec_neg_01_bad_magic",
+      "description": "Envelope with corrupted magic bytes (BAD1 instead of SUG1)",
+      "baseVectorId": "vec_pos_01_ascii",
+      "corruptType": "magic",
+      "expectedError": "InvalidMagicError"
+    },
+    {
+      "id": "vec_neg_02_unsupported_version",
+      "description": "Envelope with unsupported version byte (0x02)",
+      "baseVectorId": "vec_pos_01_ascii",
+      "corruptType": "version",
+      "expectedError": "UnsupportedVersionError"
+    },
+    {
+      "id": "vec_neg_03_truncated_header",
+      "description": "Envelope truncated to 30 bytes (below 75-byte minimum header)",
+      "baseVectorId": "vec_pos_01_ascii",
+      "corruptType": "truncate_header",
+      "expectedError": "InvalidEnvelopeError"
+    },
+    {
+      "id": "vec_neg_04_tampered_tag",
+      "description": "1 bit flipped in AES-GCM authentication tag",
+      "baseVectorId": "vec_pos_01_ascii",
+      "corruptType": "flip_tag_bit",
+      "expectedError": "AuthenticationError"
+    },
+    {
+      "id": "vec_neg_05_tampered_ciphertext",
+      "description": "1 bit flipped in ciphertext payload",
+      "baseVectorId": "vec_pos_01_ascii",
+      "corruptType": "flip_ciphertext_bit",
+      "expectedError": "AuthenticationError"
+    },
+    {
+      "id": "vec_neg_06_altered_app_id",
+      "description": "AAD altered with different appId",
+      "baseVectorId": "vec_pos_01_ascii",
+      "corruptType": "alter_aad_app_id",
+      "expectedError": "AuthenticationError"
+    },
+    {
+      "id": "vec_neg_07_altered_sha256",
+      "description": "AAD altered with different sha256Plaintext",
+      "baseVectorId": "vec_pos_01_ascii",
+      "corruptType": "alter_aad_sha256",
+      "expectedError": "AuthenticationError"
+    },
+    {
+      "id": "vec_neg_08_wrong_kek",
+      "description": "Decryption attempted with different KEK",
+      "baseVectorId": "vec_pos_01_ascii",
+      "corruptType": "wrong_kek",
+      "wrongKekHex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expectedError": "KeyProviderError"
+    }
+  ]
+}
