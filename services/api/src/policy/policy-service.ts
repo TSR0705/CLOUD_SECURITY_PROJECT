@@ -90,9 +90,9 @@ export class PolicyService {
       }
 
       await this.db.query(`SELECT audit_append($1, $2, $3, $4::jsonb, $5::jsonb)`, [
-        action,
         actorType,
         actorId,
+        action,
         JSON.stringify(sanitizedRefs),
         JSON.stringify(details),
       ]);
