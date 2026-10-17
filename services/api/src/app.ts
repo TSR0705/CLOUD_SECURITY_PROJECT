@@ -23,17 +23,22 @@ import { policyRoutes } from './routes/policy.js';
 import { UploadSessionService } from './upload/session-service.js';
 import { uploadSessionRoutes } from './routes/upload-session.js';
 import { derivePublicKeyPem } from './auth/jwt.js';
+import { createS3Provider, type StorageProvider } from '@sug/storage';
+import { StreamingUploadService } from './upload/streaming-service.js';
+import { uploadRoutes } from './routes/upload.js';
 import pg from 'pg';
 
 export interface AppOptions {
   config?: Config | undefined;
   db?: ReadinessDatabase | undefined;
   storage?: ReadinessStorage | undefined;
+  storageProvider?: StorageProvider | undefined;
   apiKeyService?: ApiKeyService | undefined;
   uploadAuthService?: UploadAuthorizationService | undefined;
   userService?: UserService | undefined;
   policyService?: PolicyService | undefined;
   uploadSessionService?: UploadSessionService | undefined;
+  streamingUploadService?: StreamingUploadService | undefined;
   authDb?: ApiKeyDatabase | undefined;
   logger?: boolean | object | undefined;
   rateLimitMax?: number | undefined;
@@ -272,6 +277,36 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     apiKeyService,
     uploadSessionService,
     jwtPrivateKeyPem: config.secrets.jwtPrivateKey,
+    jwtPublicKeyPem,
+  });
+
+  // 12. Streaming Quarantine Upload Routes (P10)
+  const storageProvider =
+    options.storageProvider ??
+    createS3Provider({
+      endpoint: config.storage.s3.endpoint,
+      region: config.storage.s3.region,
+      credentials: {
+        accessKeyId: config.storage.services.api.accessKeyId,
+        secretAccessKey:
+          config.secrets.services?.api?.secretAccessKey ?? config.secrets.awsSecretAccessKey ?? '',
+      },
+      forcePathStyle: true,
+    });
+
+  const streamingUploadService =
+    options.streamingUploadService ??
+    new StreamingUploadService({
+      db: authDb,
+      storageProvider,
+      policyService,
+      uploadSessionService,
+      quarantineBucket: config.storage.s3.quarantineBucket,
+    });
+
+  await app.register(uploadRoutes, {
+    apiKeyService,
+    streamingUploadService,
     jwtPublicKeyPem,
   });
 

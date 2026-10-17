@@ -14,6 +14,10 @@ export interface PutObjectParams {
    * Optional pre-computed SHA-256 digest (in 64-char hex or 44-char base64 format).
    */
   checksumSha256?: string | undefined;
+  /**
+   * Optional AbortSignal to abort upload in-flight
+   */
+  abortSignal?: AbortSignal | undefined;
 }
 
 export interface PutObjectResult {
