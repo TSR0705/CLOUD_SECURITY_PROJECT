@@ -6,9 +6,11 @@ import {
   decryptBuffer,
   DEFAULT_LOCAL_KEY_REFERENCE,
   encryptBuffer,
+  InvalidAadError,
   InvalidEnvelopeError,
   InvalidMagicError,
   LocalKeyProvider,
+  MIN_HEADER_BYTES,
   parseSug1Header,
   STANDARD_HEADER_BYTES,
   UnsupportedVersionError,
@@ -145,6 +147,79 @@ describe('crypto-02: Verify-Before-Release & Tamper Rejection', () => {
     const corrupted = Buffer.concat([headerPrefix, Buffer.alloc(31)]);
 
     expect(() => parseSug1Header(corrupted)).toThrow(InvalidEnvelopeError);
+  });
+
+  it('encryptBuffer rejects mismatched sha256Plaintext in AAD with InvalidAadError', async () => {
+    const mismatchedAad = {
+      ...baseAad,
+      sha256Plaintext: 'f'.repeat(64), // Does not match basePlaintext
+    };
+
+    await expect(
+      encryptBuffer(basePlaintext, {
+        keyProvider: provider,
+        aad: mismatchedAad,
+      }),
+    ).rejects.toThrow(InvalidAadError);
+  });
+
+  it('rejects envelope when decrypted plaintext digest does not match AAD sha256Plaintext', async () => {
+    // Encrypt legitimate plaintext with its correct sha256
+    const encrypted = await encryptBuffer(basePlaintext, {
+      keyProvider: provider,
+      aad: baseAad,
+    });
+
+    // Provide AAD with an altered sha256Plaintext during decrypt
+    // Even if GCM tag verification were bypassed or mismatched, digest verification fails closed
+    const alteredDigestAad = {
+      ...baseAad,
+      sha256Plaintext: crypto.createHash('sha256').update('different content').digest('hex'),
+    };
+
+    let emittedPlaintext: Buffer | null = null;
+    try {
+      emittedPlaintext = await decryptBuffer(encrypted.serialized, {
+        keyProvider: provider,
+        aad: alteredDigestAad,
+      });
+    } catch (err) {
+      expect(err).toBeInstanceOf(AuthenticationError);
+    }
+
+    expect(emittedPlaintext).toBeNull();
+  });
+
+  it('rejects envelopes at all truncated boundary lengths (0, 1, 4, 18, 19, 35, 58, 74 bytes)', () => {
+    expect(MIN_HEADER_BYTES).toBe(75);
+    const testBoundaries = [0, 1, 4, 18, 19, 35, 58, 74];
+    for (const len of testBoundaries) {
+      const truncatedBuf = Buffer.alloc(len);
+      if (len >= 4) Buffer.from('SUG1', 'ascii').copy(truncatedBuf, 0);
+      if (len >= 5) truncatedBuf.writeUInt8(1, 4);
+      if (len >= 19) truncatedBuf.writeUInt16BE(40, 17);
+
+      expect(
+        () => parseSug1Header(truncatedBuf),
+        `Should reject truncated length ${len} with InvalidEnvelopeError`,
+      ).toThrow(InvalidEnvelopeError);
+    }
+  });
+
+  it('rejects wrappedDekLength < 40 bytes with InvalidEnvelopeError', () => {
+    const invalidLengths = [0, 8, 16, 32, 39];
+    for (const badDekLen of invalidLengths) {
+      const headerBuf = Buffer.alloc(STANDARD_HEADER_BYTES);
+      Buffer.from('SUG1', 'ascii').copy(headerBuf, 0);
+      headerBuf.writeUInt8(1, 4);
+      crypto.randomBytes(12).copy(headerBuf, 5);
+      headerBuf.writeUInt16BE(badDekLen, 17);
+
+      expect(
+        () => parseSug1Header(headerBuf),
+        `Should reject wrappedDekLength ${badDekLen} with InvalidEnvelopeError`,
+      ).toThrow(InvalidEnvelopeError);
+    }
   });
 
   it('verify-before-release guarantees zero plaintext leakage on authentication failure', async () => {

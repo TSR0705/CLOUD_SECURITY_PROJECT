@@ -3,6 +3,26 @@
   "description": "Canonical SUG1 test vectors for AES-256-GCM envelope encryption and RFC 3394 key wrap",
   "positive": [
     {
+      "id": "vec_pos_00_rfc3394_standard",
+      "description": "Official IETF RFC 3394 Section 4.6 test vector (256-bit KEK + 256-bit Key Data) and NIST SP 800-38D GCM payload",
+      "standardReference": "IETF RFC 3394 Section 4.6 & NIST SP 800-38D",
+      "kekHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "dekHex": "00112233445566778899aabbccddeeff000102030405060708090a0b0c0d0e0f",
+      "nonceHex": "0102030405060708090a0b0c",
+      "plaintextUtf8": "RFC3394 Section 4.6 and NIST SP 800-38D Conformance Test Payload.",
+      "plaintextHex": "524643333339342053656374696f6e20342e3620616e64204e495354205350203830302d33384420436f6e666f726d616e63652054657374205061796c6f61642e",
+      "aad": {
+        "appId": "app_rfc3394_std",
+        "fileId": "file_nist_gcm_01",
+        "storageVersionId": "v1_official_standard",
+        "sha256Plaintext": "881c21de0b4eab47cfbf1a7a431e084a24d38f168314b26c5d74a308ecf8d54e"
+      },
+      "wrappedDekHex": "28c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21",
+      "authTagHex": "aad01597f00eabff95a07fc314bfad19",
+      "ciphertextHex": "ff7c5fa298f3815474bd0a108cbfaf3f915de59bbebffeae8293195e1118b951187d943d0a12f3f93af44247c80f51514735e7732dcf1aa6129428fc52463d5891",
+      "serializedEnvelopeHex": "53554731010102030405060708090a0b0c002828c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21aad01597f00eabff95a07fc314bfad19ff7c5fa298f3815474bd0a108cbfaf3f915de59bbebffeae8293195e1118b951187d943d0a12f3f93af44247c80f51514735e7732dcf1aa6129428fc52463d5891"
+    },
+    {
       "id": "vec_pos_01_ascii",
       "description": "Standard ASCII sentence with known keys and AAD",
       "kekHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",

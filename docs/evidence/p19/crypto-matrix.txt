@@ -1,7 +1,7 @@
 ================================================================================
 SECURE UPLOAD GATEWAY (SUG) - PHASE P19 CRYPTOGRAPHIC VERIFICATION MATRIX
 ================================================================================
-Timestamp: 2026-10-17T07:45:00Z
+Timestamp: 2026-10-17T08:35:00Z
 Phase: P19 - AES-256-GCM Envelope Encryption & Key Management
 Package: packages/crypto
 Format: SUG1 Binary Envelope (ADR-0010 Section 1)
@@ -19,7 +19,7 @@ Status: VERIFIED & PASSING
 - Master Key Encryption Key (KEK): 256 bits (32 bytes)
 - Header Prefix Size: 19 bytes
 - Standard Header Size: 75 bytes (19 prefix + 40 wrapped DEK + 16 auth tag)
-- Minimum Envelope Size: 35 bytes (19 prefix + 0 wrapped DEK + 16 auth tag)
+- Minimum Envelope Size: 75 bytes (19 prefix + 40 wrapped DEK + 16 auth tag + 0 ciphertext)
 
 --------------------------------------------------------------------------------
 2. WIRE FORMAT LAYOUT (ADR-0010 §1)
@@ -48,9 +48,11 @@ Bound Fields:
   - storageVersionId: Immutable object storage version
   - sha256Plaintext: 64-character lowercase hexadecimal plaintext digest
 
-Tamper Detection:
+Tamper & Integrity Detection:
   - Any modification to appId, fileId, storageVersionId, or sha256Plaintext
     immediately triggers AuthenticationError during verify-before-release decryption.
+  - Decrypted plaintext SHA-256 digest is independently recomputed and verified
+    against the authenticated sha256Plaintext before plaintext release.
 
 --------------------------------------------------------------------------------
 4. KEY PROVIDER ARCHITECTURE
@@ -58,12 +60,14 @@ Tamper Detection:
 - KeyProvider: Abstract interface (providerId, defaultKeyReference, wrapKey, unwrapKey)
 - LocalKeyProvider:
   - Loads 256-bit KEK from in-memory options, secret files (/run/secrets/kek, secretsDir), or SUG_KEK env var
+  - Sanitizes keyReference and prevents path traversal out of secretsDir
   - Rejects invalid KEK lengths (< 32 or > 32 bytes) with KeyProviderError
   - Wraps DEK using RFC 3394 (32 bytes -> 40 bytes)
   - Unwraps DEK using RFC 3394 with strict integrity verification; fails closed on wrong KEK
 - KmsKeyProvider:
   - Live production mode (mock: false): Fails closed with KeyProviderError
   - Hermetic unit test mode (mock: true): Simulated KMS wrapping using derived keys
+  - Production Guard: Strictly forbids mock mode when NODE_ENV === 'production'
 
 --------------------------------------------------------------------------------
 5. VERIFICATION SUITE MATRIX (DoD: crypto-01 to crypto-04)
@@ -71,13 +75,13 @@ Tamper Detection:
 ID         | Description                                  | Test File                                     | Tests | Status
 -----------+----------------------------------------------+-----------------------------------------------+-------+-------
 crypto-01  | Envelope Encryption & Round-Trip Decryption  | tests/unit/crypto/crypto-01-envelope.test.ts  | 7     | PASS
-crypto-02  | Verify-Before-Release & Tamper Rejection     | tests/unit/crypto/crypto-02-verify-...test.ts | 8     | PASS
+crypto-02  | Verify-Before-Release & Tamper Rejection     | tests/unit/crypto/crypto-02-verify-...test.ts | 12    | PASS
 crypto-03  | AAD Identity Binding                         | tests/unit/crypto/crypto-03-aad-...test.ts    | 11    | PASS
-crypto-04  | Key Management & Provider Fail-Closed        | tests/unit/crypto/crypto-04-key-...test.ts    | 13    | PASS
+crypto-04  | Key Management & Provider Fail-Closed        | tests/unit/crypto/crypto-04-key-...test.ts    | 15    | PASS
 nonce-uniq | 10,000-Iteration Nonce Collision Resistance  | tests/unit/crypto/nonce-uniqueness.test.ts    | 2     | PASS
-vectors    | Stored Cryptographic Test Vectors Runner     | tests/unit/crypto/test-vectors.test.ts        | 11    | PASS
+vectors    | Stored Cryptographic Test Vectors Runner     | tests/unit/crypto/test-vectors.test.ts        | 15    | PASS
 invariants | 10 Core Security Invariants Verification     | tests/unit/crypto/security-invariants.test.ts | 10    | PASS
 edge-cases | Defensive Branch & Boundary Verification     | tests/unit/crypto/edge-cases.test.ts          | 11    | PASS
 -----------+----------------------------------------------+-----------------------------------------------+-------+-------
-TOTAL      | 8 Test Suites                                | tests/unit/crypto/                            | 73    | PASS
+TOTAL      | 8 Test Suites                                | tests/unit/crypto/                            | 83    | PASS
 ================================================================================

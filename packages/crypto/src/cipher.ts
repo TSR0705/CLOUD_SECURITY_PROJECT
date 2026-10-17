@@ -5,10 +5,15 @@
 
 import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
-import { buildCanonicalAad } from './aad.js';
+import { buildCanonicalAad, normalizeAadInput } from './aad.js';
 import { AUTH_TAG_BYTES, DEK_BYTES, NONCE_BYTES, SUG1_MAGIC, SUG1_VERSION } from './constants.js';
 import { extractCiphertext, parseSug1Header, serializeSug1Envelope } from './envelope.js';
-import { AuthenticationError, CryptoError, InvalidEnvelopeError } from './errors.js';
+import {
+  AuthenticationError,
+  CryptoError,
+  InvalidAadError,
+  InvalidEnvelopeError,
+} from './errors.js';
 import type { DecryptOptions, EncryptedObject, EncryptOptions, Sug1Header } from './types.js';
 
 /**
@@ -31,11 +36,12 @@ export function generateNonce(): Buffer {
  *
  * Algorithm:
  * 1. Generates fresh 256-bit DEK and fresh 96-bit CSPRNG nonce.
- * 2. Encodes canonical AAD binding (appId, fileId, storageVersionId, sha256Plaintext).
- * 3. Encrypts plaintext with AES-256-GCM and computes 128-bit authentication tag.
- * 4. Wraps DEK with the specified KeyProvider (RFC 3394 AES Key Wrap).
- * 5. Serializes header + wrapped DEK + auth tag + ciphertext into canonical SUG1 binary envelope.
- * 6. Securely zeroes in-memory DEK before returning.
+ * 2. Validates that declared sha256Plaintext matches the actual plaintext digest.
+ * 3. Encodes canonical AAD binding (appId, fileId, storageVersionId, sha256Plaintext).
+ * 4. Encrypts plaintext with AES-256-GCM and computes 128-bit authentication tag.
+ * 5. Wraps DEK with the specified KeyProvider (RFC 3394 AES Key Wrap).
+ * 6. Serializes header + wrapped DEK + auth tag + ciphertext into canonical SUG1 binary envelope.
+ * 7. Securely zeroes in-memory DEK before returning.
  */
 export async function encryptBuffer(
   plaintext: Buffer,
@@ -49,8 +55,24 @@ export async function encryptBuffer(
     throw new CryptoError('EncryptOptions.keyProvider is required');
   }
 
-  // 1. Build canonical AAD buffer (validates all required identity fields)
-  const canonicalAad = buildCanonicalAad(options.aad);
+  // 1. Verify and normalize AAD input
+  const actualPlaintextSha = crypto.createHash('sha256').update(plaintext).digest('hex');
+  const normalizedAadInput = normalizeAadInput(options.aad);
+
+  // Validate that caller-provided sha256Plaintext matches actual plaintext digest
+  if (
+    normalizedAadInput.sha256Plaintext.length !== actualPlaintextSha.length ||
+    !crypto.timingSafeEqual(
+      Buffer.from(normalizedAadInput.sha256Plaintext, 'ascii'),
+      Buffer.from(actualPlaintextSha, 'ascii'),
+    )
+  ) {
+    throw new InvalidAadError(
+      `AAD sha256Plaintext mismatch: declared '${normalizedAadInput.sha256Plaintext}', but plaintext hashes to '${actualPlaintextSha}'`,
+    );
+  }
+
+  const canonicalAad = buildCanonicalAad(normalizedAadInput);
 
   // 2. Obtain DEK and Nonce (supports test vectors with custom keys)
   const dek = options.customDek ? Buffer.from(options.customDek) : generateDek();
@@ -125,7 +147,8 @@ export async function encryptBuffer(
  *
  * Security Invariant:
  * Plaintext is NEVER emitted or returned if the AES-GCM authentication tag
- * fails verification, if AAD is altered, or if the envelope is corrupted.
+ * fails verification, if AAD is altered, if the envelope is corrupted, or if
+ * the recomputed plaintext SHA-256 digest does not match the bound AAD identity.
  */
 export async function decryptBuffer(
   envelope: Buffer | { serialized: Buffer } | { header: Sug1Header; ciphertext: Buffer },
@@ -152,23 +175,28 @@ export async function decryptBuffer(
   }
 
   // 1. Build canonical AAD buffer (validates expected identity)
-  const canonicalAad = buildCanonicalAad(options.aad);
+  const normalizedAadInput = normalizeAadInput(options.aad);
+  const canonicalAad = buildCanonicalAad(normalizedAadInput);
 
   // 2. Unwrap DEK using KeyProvider
   const dek = await options.keyProvider.unwrapKey(header.wrappedDek, options.keyReference);
 
   // 3. Verify-Before-Release Decryption
   let plaintextBuffer: Buffer | null = null;
+  let chunk1: Buffer | null = null;
   try {
     const decipher = crypto.createDecipheriv('aes-256-gcm', dek, header.nonce);
     decipher.setAAD(canonicalAad);
     decipher.setAuthTag(header.authTag);
 
-    const chunk1 = decipher.update(ciphertext);
+    chunk1 = decipher.update(ciphertext);
     const chunk2 = decipher.final(); // Authenticates tag and AAD against ciphertext
 
     plaintextBuffer = Buffer.concat([chunk1, chunk2]);
   } catch (err) {
+    if (chunk1) {
+      chunk1.fill(0);
+    }
     throw new AuthenticationError(
       `Ciphertext authentication failed: tag mismatch, altered AAD, or corrupted payload. ${(err as Error).message}`,
     );
@@ -179,6 +207,22 @@ export async function decryptBuffer(
 
   if (plaintextBuffer === null) {
     throw new AuthenticationError('Authentication failed: no plaintext produced');
+  }
+
+  // 4. Independently verify that the recomputed plaintext digest strictly matches the expected AAD sha256Plaintext
+  const computedPlaintextSha = crypto.createHash('sha256').update(plaintextBuffer).digest('hex');
+  const digestMatches =
+    computedPlaintextSha.length === normalizedAadInput.sha256Plaintext.length &&
+    crypto.timingSafeEqual(
+      Buffer.from(computedPlaintextSha, 'ascii'),
+      Buffer.from(normalizedAadInput.sha256Plaintext, 'ascii'),
+    );
+
+  if (!digestMatches) {
+    plaintextBuffer.fill(0);
+    throw new AuthenticationError(
+      `Plaintext digest verification failed: expected '${normalizedAadInput.sha256Plaintext}', computed '${computedPlaintextSha}'`,
+    );
   }
 
   return plaintextBuffer;

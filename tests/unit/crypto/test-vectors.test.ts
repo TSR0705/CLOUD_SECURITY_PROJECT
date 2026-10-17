@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,6 +62,57 @@ const vectorFilePath = path.resolve(
 describe('P19 Cryptographic Test Vectors Runner (sug1-vectors.json)', () => {
   const vectorFileContent = fs.readFileSync(vectorFilePath, 'utf8');
   const vectorData: VectorFile = JSON.parse(vectorFileContent);
+
+  describe('Official Published Standards Test Vectors', () => {
+    it('matches RFC 3394 Section 4.6 (Wrap 256 Bits of Key Data with 256-Bit KEK)', async () => {
+      // IETF RFC 3394 Section 4.6
+      const kek = Buffer.from(
+        '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f',
+        'hex',
+      );
+      const keyData = Buffer.from(
+        '00112233445566778899aabbccddeeff000102030405060708090a0b0c0d0e0f',
+        'hex',
+      );
+      const expectedWrapped =
+        '28c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21';
+
+      const provider = new LocalKeyProvider({
+        keys: { [DEFAULT_LOCAL_KEY_REFERENCE]: kek },
+      });
+
+      const { wrappedKey } = await provider.wrapKey(keyData);
+      expect(wrappedKey.toString('hex').toLowerCase()).toBe(expectedWrapped);
+
+      const unwrapped = await provider.unwrapKey(Buffer.from(expectedWrapped, 'hex'));
+      expect(unwrapped.equals(keyData)).toBe(true);
+    });
+
+    it('matches NIST SP 800-38D Test Case 13 (AES-256-GCM zero plaintext, zero AAD)', () => {
+      // NIST SP 800-38D Case 13
+      const key = Buffer.alloc(32);
+      const iv = Buffer.alloc(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+      const ct = Buffer.concat([cipher.update(Buffer.alloc(0)), cipher.final()]);
+      const tag = cipher.getAuthTag();
+
+      expect(ct.length).toBe(0);
+      expect(tag.toString('hex').toLowerCase()).toBe('530f8afbc74536b9a963b4f1c4cb738b');
+    });
+
+    it('matches NIST SP 800-38D Test Case 14 (AES-256-GCM 16-byte plaintext)', () => {
+      // NIST SP 800-38D Case 14
+      const key = Buffer.alloc(32);
+      const iv = Buffer.alloc(12);
+      const plaintext = Buffer.alloc(16);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+      const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const tag = cipher.getAuthTag();
+
+      expect(ct.toString('hex').toLowerCase()).toBe('cea7403d4d606b6e074ec5d3baf39d18');
+      expect(tag.toString('hex').toLowerCase()).toBe('d0d1c8a799996bf0265b98b5d48ab919');
+    });
+  });
 
   describe('Positive Test Vectors', () => {
     for (const vec of vectorData.positive) {

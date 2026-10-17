@@ -143,18 +143,22 @@ export class LocalKeyProvider implements KeyProvider {
 
     // 3. secretsDir lookup
     if (this.secretsDir && fs.existsSync(this.secretsDir)) {
+      const normalizedSecretsDir = path.resolve(this.secretsDir);
       const sanitizedRef = keyReference.replace(/[^a-zA-Z0-9_-]/g, '_');
       const candidatePaths = [
-        path.join(this.secretsDir, keyReference),
-        path.join(this.secretsDir, sanitizedRef),
-        path.join(this.secretsDir, 'kek'),
-        path.join(this.secretsDir, 'sug_kek'),
+        path.join(normalizedSecretsDir, sanitizedRef),
+        path.join(normalizedSecretsDir, 'kek'),
+        path.join(normalizedSecretsDir, 'sug_kek'),
       ];
       for (const cand of candidatePaths) {
-        if (fs.existsSync(cand)) {
+        const resolvedCand = path.resolve(cand);
+        if (!resolvedCand.startsWith(normalizedSecretsDir)) {
+          continue;
+        }
+        if (fs.existsSync(resolvedCand)) {
           try {
-            const content = fs.readFileSync(cand);
-            const kek = normalizeKek(content, `secretsDir '${cand}'`);
+            const content = fs.readFileSync(resolvedCand);
+            const kek = normalizeKek(content, `secretsDir '${resolvedCand}'`);
             this.keyStore.set(keyReference, kek);
             return kek;
           } catch {

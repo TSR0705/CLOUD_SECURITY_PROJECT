@@ -195,5 +195,31 @@ describe('crypto-04: Key Management & Provider Fail-Closed Behavior', () => {
         KeyProviderError,
       );
     });
+
+    it('strictly forbids mock KMS mode when NODE_ENV is set to production', () => {
+      const prevEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        expect(() => new KmsKeyProvider({ mock: true })).toThrow(KeyProviderError);
+      } finally {
+        if (prevEnv !== undefined) {
+          process.env.NODE_ENV = prevEnv;
+        } else {
+          delete process.env.NODE_ENV;
+        }
+      }
+    });
+
+    it('rejects path traversal attempts in keyReference under secretsDir', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sug-traversal-'));
+      try {
+        const provider = new LocalKeyProvider({ secretsDir: tmpDir });
+        await expect(provider.wrapKey(validDek, '../../../secret_outside')).rejects.toThrow(
+          KeyProviderError,
+        );
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
   });
 });

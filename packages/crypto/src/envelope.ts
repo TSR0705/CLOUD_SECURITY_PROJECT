@@ -9,6 +9,7 @@ import {
   HEADER_PREFIX_BYTES,
   MIN_HEADER_BYTES,
   NONCE_BYTES,
+  RFC3394_WRAPPED_DEK_BYTES,
   SUG1_MAGIC,
   SUG1_MAGIC_BYTES,
   SUG1_VERSION,
@@ -24,10 +25,10 @@ import type { Sug1Header } from './types.js';
  * - Offset 4:      Version (1 byte, 0x01)
  * - Offset 5..16:  IV / Nonce (12 bytes)
  * - Offset 17..18: Wrapped DEK Length (2 bytes, uint16BE)
- * - Offset 19..N:  Wrapped DEK (variable bytes)
+ * - Offset 19..N:  Wrapped DEK (variable bytes, minimum 40 bytes)
  * - Followed by:   Auth Tag (16 bytes)
  *
- * Total header length = 19 + wrappedDekLength + 16
+ * Total header length = 19 + wrappedDekLength + 16 (minimum 75 bytes)
  */
 export function parseSug1Header(buffer: Buffer): Sug1Header {
   if (!Buffer.isBuffer(buffer)) {
@@ -57,8 +58,13 @@ export function parseSug1Header(buffer: Buffer): Sug1Header {
 
   // 4. Extract Wrapped DEK Length (uint16BE)
   const wrappedDekLength = buffer.readUInt16BE(17);
-  const minRequiredLength = HEADER_PREFIX_BYTES + wrappedDekLength + AUTH_TAG_BYTES;
+  if (wrappedDekLength < RFC3394_WRAPPED_DEK_BYTES) {
+    throw new InvalidEnvelopeError(
+      `Invalid wrapped DEK length: expected at least ${RFC3394_WRAPPED_DEK_BYTES} bytes, got ${wrappedDekLength}`,
+    );
+  }
 
+  const minRequiredLength = HEADER_PREFIX_BYTES + wrappedDekLength + AUTH_TAG_BYTES;
   if (buffer.length < minRequiredLength) {
     throw new InvalidEnvelopeError(
       `Truncated envelope header: expected at least ${minRequiredLength} bytes for wrapped DEK (${wrappedDekLength} bytes) + auth tag, got ${buffer.length}`,

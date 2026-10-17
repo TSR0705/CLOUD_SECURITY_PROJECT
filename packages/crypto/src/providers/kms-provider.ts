@@ -33,6 +33,12 @@ export class KmsKeyProvider implements KeyProvider {
   constructor(options: KmsKeyProviderOptions = {}) {
     this.mock = options.mock ?? false;
     this.defaultKeyReference = options.defaultKeyReference ?? DEFAULT_MOCK_KMS_KEY_REF;
+
+    if (this.mock && process.env.NODE_ENV === 'production') {
+      throw new KeyProviderError(
+        'Mock KMS provider is strictly forbidden when NODE_ENV is set to "production"',
+      );
+    }
   }
 
   private deriveMockKey(keyReference: string): Buffer {

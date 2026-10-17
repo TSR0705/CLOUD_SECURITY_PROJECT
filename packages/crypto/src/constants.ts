@@ -36,6 +36,8 @@ export const RFC3394_WRAPPED_DEK_BYTES = 40; // 32 bytes DEK + 8 bytes ICV
  * Followed by:   Ciphertext (stream to EOF)
  */
 export const HEADER_PREFIX_BYTES = 19; // Offset to start of wrapped DEK
-export const MIN_HEADER_BYTES = HEADER_PREFIX_BYTES + AUTH_TAG_BYTES; // 35 bytes (0-byte wrapped DEK)
+export const MIN_WRAPPED_DEK_BYTES = RFC3394_WRAPPED_DEK_BYTES; // 40 bytes minimum for RFC 3394
 export const STANDARD_HEADER_BYTES =
   HEADER_PREFIX_BYTES + RFC3394_WRAPPED_DEK_BYTES + AUTH_TAG_BYTES; // 75 bytes
+export const MIN_HEADER_BYTES = STANDARD_HEADER_BYTES; // 75 bytes minimum for valid SUG1 envelope
+export const MIN_ENVELOPE_BYTES = STANDARD_HEADER_BYTES; // 75 bytes (0-byte empty plaintext payload)
