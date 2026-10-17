@@ -35,14 +35,7 @@
             "example": "c0a80101-0000-0000-0000-000000000000"
           }
         },
-        "required": [
-          "type",
-          "title",
-          "status",
-          "detail",
-          "instance",
-          "requestId"
-        ]
+        "required": ["type", "title", "status", "detail", "instance", "requestId"]
       }
     },
     "headers": {
@@ -67,9 +60,7 @@
     "/healthz": {
       "get": {
         "summary": "Process liveness probe",
-        "tags": [
-          "Health"
-        ],
+        "tags": ["Health"],
         "description": "Answers whether the API process is alive. Does not perform I/O or query dependencies.",
         "responses": {
           "200": {
@@ -82,15 +73,11 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "ok"
-                      ],
+                      "enum": ["ok"],
                       "example": "ok"
                     }
                   },
-                  "required": [
-                    "status"
-                  ]
+                  "required": ["status"]
                 }
               }
             }
@@ -101,9 +88,7 @@
     "/readyz": {
       "get": {
         "summary": "Dependency readiness probe",
-        "tags": [
-          "Health"
-        ],
+        "tags": ["Health"],
         "description": "Verifies reachability of core infrastructure dependencies (PostgreSQL database and S3 storage) before accepting traffic.",
         "responses": {
           "200": {
@@ -116,15 +101,11 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "ready"
-                      ],
+                      "enum": ["ready"],
                       "example": "ready"
                     }
                   },
-                  "required": [
-                    "status"
-                  ]
+                  "required": ["status"]
                 }
               }
             }
@@ -139,15 +120,11 @@
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "not_ready"
-                      ],
+                      "enum": ["not_ready"],
                       "example": "not_ready"
                     }
                   },
-                  "required": [
-                    "status"
-                  ]
+                  "required": ["status"]
                 }
               }
             }
@@ -158,9 +135,7 @@
     "/api/v1/auth/probe": {
       "get": {
         "summary": "Verify API key credential",
-        "tags": [
-          "Authentication"
-        ],
+        "tags": ["Authentication"],
         "description": "Validates the provided Bearer API key in constant time and returns non-sensitive authenticated application context.",
         "security": [
           {
@@ -194,18 +169,10 @@
                       "items": {
                         "type": "string"
                       },
-                      "example": [
-                        "upload",
-                        "read"
-                      ]
+                      "example": ["upload", "read"]
                     }
                   },
-                  "required": [
-                    "status",
-                    "applicationId",
-                    "keyPrefix",
-                    "scopes"
-                  ]
+                  "required": ["status", "applicationId", "keyPrefix", "scopes"]
                 }
               }
             }
@@ -243,14 +210,7 @@
                       "example": "018f3a5e-7a42-7000-8000-000000000001"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail",
-                    "instance",
-                    "requestId"
-                  ]
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
                 }
               }
             }
@@ -288,14 +248,7 @@
                       "example": "018f3a5e-7a42-7000-8000-000000000001"
                     }
                   },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail",
-                    "instance",
-                    "requestId"
-                  ]
+                  "required": ["type", "title", "status", "detail", "instance", "requestId"]
                 }
               }
             }
