@@ -1,0 +1,127 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P17 SCAN FINDINGS API EVIDENCE
+GET /api/v1/scans/:id SPECIFICATION, AUTHORIZATION & BOUNDARY VERIFICATION
+================================================================================
+
+1. ENDPOINT SPECIFICATION
+--------------------------------------------------------------------------------
+Path:        GET /api/v1/scans/:id
+Description: Retrieves scan job execution status and deterministic security findings.
+Auth:        Bearer <sug_api_key> (P6 API Key) OR Bearer <user_jwt> (P7 Dashboard JWT)
+OpenAPI:     Generated and validated in docs/openapi.json under "Scans" tag.
+
+2. SECURITY & AUTHORIZATION INVARIANTS
+--------------------------------------------------------------------------------
+1. Authentication:
+   - Unauthenticated requests return HTTP 401 with RFC 7807/9457 Problem Details.
+   - Rejects invalid, malformed, or revoked API keys and expired JWTs.
+2. Parameter Validation:
+   - Non-UUID scan IDs return HTTP 400 with `urn:sug:error:validation`.
+3. Existence:
+   - Unknown scan jobs return HTTP 404 with `urn:sug:error:not-found`.
+4. Tenant Application Isolation:
+   - If authenticated via API Key: the scan job's associated file must belong to
+     the caller's `application_id`.
+   - Access attempts across tenant applications return HTTP 403 Forbidden with
+     `urn:sug:error:forbidden`.
+5. Empty Findings Handling:
+   - If a scan job is queued, running, or has no findings recorded yet, the endpoint
+     returns HTTP 200 OK with `findings: []`.
+6. Deterministic Finding Order:
+   - All findings returned in the `findings` array are deterministically sorted
+     by `check_id ASC`.
+7. Safe Response Fields & Secret Sanitization:
+   - Serialized strictly against Fastify OpenAPI response schema.
+   - Any sensitive internal database columns, pepper, passwords, raw hashes, or
+     file paths are stripped and never leaked in API responses.
+
+3. RESPONSE PAYLOAD SCHEMA (HTTP 200 OK)
+--------------------------------------------------------------------------------
+{
+  "id": "018f3a5e-7a42-7000-8000-000000000001",
+  "status": "SUCCEEDED",
+  "fileVersionId": "018f3a5e-7a42-7000-8000-000000000002",
+  "createdAt": "2026-10-01T10:00:00.000Z",
+  "finishedAt": "2026-10-01T10:00:01.250Z",
+  "findings": [
+    {
+      "id": "018f3a5e-7a42-7000-8000-000000000010",
+      "checkId": "scanner.archive",
+      "engine": "yauzl",
+      "engineVersion": "3.4.0",
+      "signatureVersion": null,
+      "outcome": "PASS",
+      "reasonCode": "CLEAN",
+      "severity": "INFO",
+      "confidence": "CONFIRMED",
+      "evidence": { "status": "CLEAN", "entryCount": 1 },
+      "scannedStorageVersionId": "v1-quarantine-version",
+      "scannedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scannedSize": 1024,
+      "durationMs": 15,
+      "createdAt": "2026-10-01T10:00:00.500Z"
+    },
+    {
+      "id": "018f3a5e-7a42-7000-8000-000000000011",
+      "checkId": "scanner.clamav",
+      "engine": "clamav",
+      "engineVersion": "1.4.6",
+      "signatureVersion": null,
+      "outcome": "PASS",
+      "reasonCode": "CLEAN",
+      "severity": "INFO",
+      "confidence": "CONFIRMED",
+      "evidence": { "status": "CLEAN" },
+      "scannedStorageVersionId": "v1-quarantine-version",
+      "scannedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scannedSize": 1024,
+      "durationMs": 45,
+      "createdAt": "2026-10-01T10:00:00.750Z"
+    },
+    {
+      "id": "018f3a5e-7a42-7000-8000-000000000012",
+      "checkId": "scanner.yara",
+      "engine": "yara-x",
+      "engineVersion": "1.20.0",
+      "signatureVersion": null,
+      "outcome": "PASS",
+      "reasonCode": "CLEAN",
+      "severity": "INFO",
+      "confidence": "CONFIRMED",
+      "evidence": { "status": "CLEAN", "matches": [] },
+      "scannedStorageVersionId": "v1-quarantine-version",
+      "scannedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scannedSize": 1024,
+      "durationMs": 20,
+      "createdAt": "2026-10-01T10:00:01.000Z"
+    }
+  ]
+}
+
+4. DATABASE LEAST-PRIVILEGE ROLE ENFORCEMENT
+--------------------------------------------------------------------------------
+Role `sug_scanner`:
+  - Granted: SELECT, INSERT on `scan_results`; SELECT, UPDATE on `scan_jobs`; SELECT on `file_versions`.
+  - Prohibited: UPDATE and DELETE on `scan_results` (enforced via trigger and role grants).
+  - Verified: scanner inserts findings successfully and queries existing findings for idempotency.
+Role `sug_api`:
+  - Granted: SELECT on `scan_results`, `scan_jobs`, `file_versions`.
+  - Prohibited: INSERT, UPDATE, and DELETE on `scan_results`.
+  - Verified: API queries findings for tenant-scoped responses; direct INSERT attempts fail with
+    PostgreSQL error: permission denied for table scan_results.
+
+5. TEST EXECUTION SUMMARY
+--------------------------------------------------------------------------------
+Suite: tests/integration/api/p17-scans-api.test.ts (9/9 PASS)
+  - rejects unauthenticated requests with 401 Problem Details:               PASS
+  - rejects invalid UUID format with 400 Problem Details:                    PASS
+  - returns 404 Problem Details when scan job does not exist:                PASS
+  - enforces tenant application boundary (returns 403 when App B accesses A):PASS
+  - returns scan status and deterministically sorted findings for API key:   PASS
+  - allows access to scan job for authorized Dashboard User JWT:             PASS
+  - returns empty findings list (findings: []) when scan job has no findings:PASS
+  - sanitizes response and never exposes sensitive internal fields or leaks: PASS
+  - verifies database role permissions (sug_scanner vs sug_api):            PASS
+
+GATE VERDICT: FULL PASS
+================================================================================

@@ -1,0 +1,174 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P17 FINDINGS MODEL EVIDENCE
+CANONICAL SCHEMA, REASON CODES, IDEMPOTENCY & ARTIFACT IDENTITY BINDING
+================================================================================
+
+1. CANONICAL FINDINGS ARCHITECTURE
+--------------------------------------------------------------------------------
+Phase P17 finalizes the unified findings persistence model for all scanning engines.
+Every detector (ClamAV, YARA-X, Archive, PDF, OOXML Macro, OOXML Relationship,
+Image Trailing, Embedded Signatures [PE, ELF, Mach-O], Polyglots) produces deterministic
+findings persisted into the immutable `scan_results` relation.
+
+CRITICAL INVARIANT:
+P17 is strictly an EVIDENCE and DETECTION phase.
+Findings record what was observed (PASS, FAIL, SUSPICIOUS, ERROR, SKIPPED).
+P17 DOES NOT evaluate policy decisions, calculate risk scores, or emit
+ALLOW, BLOCK, or QUARANTINE verdicts (reserved for Phase P18 Decision Engine).
+
+2. DATABASE SCHEMA & IMMUTABILITY (scan_results)
+--------------------------------------------------------------------------------
+CREATE TABLE scan_results (
+    id                          uuid PRIMARY KEY DEFAULT uuidv7(),
+    scan_job_id                 uuid NOT NULL REFERENCES scan_jobs(id),
+    file_version_id             uuid NOT NULL REFERENCES file_versions(id),
+    check_id                    text NOT NULL,
+    engine                      text NOT NULL,
+    engine_version              text,
+    signature_version           text,
+    outcome                     finding_outcome NOT NULL,
+    reason_code                 text,
+    severity                    severity_level NOT NULL DEFAULT 'INFO',
+    confidence                  confidence_level NOT NULL DEFAULT 'CONFIRMED',
+    evidence                    jsonb NOT NULL DEFAULT '{}',
+    scanned_storage_version_id  text NOT NULL,
+    scanned_sha256              bytea NOT NULL CHECK (octet_length(scanned_sha256) = 32),
+    scanned_size                bigint NOT NULL,
+    duration_ms                 integer,
+    created_at                  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (scan_job_id, check_id)
+);
+
+CREATE TRIGGER scan_results_immutable
+    BEFORE UPDATE OR DELETE OR TRUNCATE ON scan_results
+    FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
+
+IMMUTABILITY & REFERENTIAL INTEGRITY TRIGGERS:
+1. `scan_results_immutable`:
+   Enforces append-only semantics on scan_results via PostgreSQL trigger:
+     RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+2. `file_versions_immutable`:
+   Enforces append-only semantics on file_versions via PostgreSQL trigger.
+3. `scan_jobs_file_version_immutable`:
+   BEFORE UPDATE trigger on scan_jobs:
+     IF OLD.file_version_id IS DISTINCT FROM NEW.file_version_id THEN
+       RAISE EXCEPTION 'scan_jobs.file_version_id is immutable';
+     END IF;
+   Guarantees that a scan job can NEVER have its target file_version_id switched.
+4. `scan_results_identity_check`:
+   BEFORE INSERT trigger on scan_results:
+     SELECT file_version_id INTO job_fv_id FROM scan_jobs WHERE id = NEW.scan_job_id;
+     IF job_fv_id IS NULL OR job_fv_id != NEW.file_version_id THEN
+       RAISE EXCEPTION 'scan_results.file_version_id does not match scan_jobs.file_version_id';
+     END IF;
+   Guarantees that no finding can ever be inserted under a scan_job_id with a mismatched file_version_id.
+
+3. ARTIFACT IDENTITY TUPLE BINDING & RETRY BEHAVIOR
+--------------------------------------------------------------------------------
+Every row in `scan_results` is cryptographically bound to the artifact scanned:
+  (bucket, object_key, scanned_storage_version_id, scanned_sha256, scanned_size)
+
+Immutable Foreign-Key Relationship:
+  `scan_results.file_version_id` -> `file_versions.id`
+  `scan_jobs.file_version_id` -> `file_versions.id`
+
+Worker Retry & Anti-Stale Findings Protection:
+  A critical security property is that worker retries CANNOT silently preserve
+  findings from an earlier scan attempt with a different artifact identity.
+  The worker enforces this at two layers:
+
+  1. Pre-Execution Prior Finding Audit:
+     Immediately after verifying quarantine bytes against ingest metadata, the worker
+     queries all pre-existing findings recorded under `job.id`:
+       SELECT check_id, file_version_id, scanned_storage_version_id, scanned_sha256, scanned_size
+       FROM scan_results WHERE scan_job_id = $1;
+     If ANY pre-existing finding has a mismatched file_version_id, storage_version_id,
+     sha256, or size:
+       -> Scanner worker IMMEDIATELY halts.
+       -> Marks scan job DEAD with error detail 'Artifact identity conflict on scan retry'.
+       -> Zero subsequent scanning occurs; mismatched findings are NEVER silently preserved.
+
+  2. recordFinding Identity Verification:
+     When recording each finding, the worker checks if a finding already exists for (jobId, checkId):
+     - If exists and matches exact identity (fileVersionId, storageVersionId, sha256, sizeBytes):
+       idempotent retry, preserves existing finding.
+     - If exists but has ANY mismatched identity field:
+       throws Error('Artifact identity conflict on scan job retry: existing finding ... belongs to a different artifact identity').
+
+  3. Cryptographic Ingest Mismatch Guard:
+     If bytes fetched from quarantine bucket do not match file_versions.sha256_ingest or size_bytes:
+     - Worker immediately aborts, marks job DEAD with IDENTITY_MISMATCH, and executes zero format checks.
+
+  4. Storage Overwrite Resistance:
+     Worker explicitly requests `getByVersion({ bucket, key, versionId: storageVersionId })`,
+     immunizing findings from subsequent storage overwrites.
+
+4. CANONICAL REASON CODE REGISTRY
+--------------------------------------------------------------------------------
+Stable machine-readable identifiers registered in @sug/shared/reasons:
+
+Check ID                     Canonical Reason Code            Outcome    Default Severity
+-----------------------------------------------------------------------------------------
+universal                    CLEAN                            PASS       INFO
+universal                    SCANNER_ERROR                    ERROR      HIGH
+universal                    NOT_APPLICABLE                   SKIPPED    INFO
+universal                    MALWARE_DETECTED                 FAIL       CRITICAL
+scanner.archive              ARCHIVE_BOMB_DETECTED            FAIL       CRITICAL
+scanner.archive              COMPRESSION_RATIO_EXCEEDED       FAIL       HIGH
+scanner.archive              UNCOMPRESSED_SIZE_EXCEEDED       FAIL       HIGH
+scanner.archive              ENTRY_COUNT_EXCEEDED             FAIL       HIGH
+scanner.archive              OVERLAPPING_ENTRIES              FAIL       CRITICAL
+scanner.archive              DUPLICATE_ENTRY_NAMES            FAIL       MEDIUM
+scanner.archive              UNSAFE_PATH                      FAIL       CRITICAL
+scanner.archive              ZIP_SLIP_DETECTED                FAIL       CRITICAL
+scanner.archive              ENCRYPTED_ARCHIVE_FORBIDDEN      FAIL       HIGH
+scanner.archive              UNSUPPORTED_COMPRESSION_METHOD   FAIL       MEDIUM
+scanner.archive              SYMLINK_FORBIDDEN                FAIL       HIGH
+scanner.archive              NESTED_ARCHIVE_DEPTH_EXCEEDED    FAIL       HIGH
+scanner.archive              CORRUPT_ARCHIVE                  FAIL       HIGH
+scanner.archive              SIZE_MISMATCH                    FAIL       HIGH
+scanner.archive              CRC_MISMATCH                     FAIL       HIGH
+scanner.archive              TIMEOUT_EXCEEDED                 FAIL       HIGH
+scanner.archive              MEMORY_BUDGET_EXCEEDED           FAIL       HIGH
+scanner.archive              ARCHIVE_FORBIDDEN                FAIL       HIGH
+scanner.pdf                  ACTIVE_CONTENT_DETECTED          FAIL       HIGH
+scanner.pdf                  PDF_MALFORMED                    ERROR      HIGH
+scanner.pdf                  PDF_NORMALIZATION_FAILED         ERROR      HIGH
+scanner.ooxml.macro          OOXML_MACRO_DETECTED             FAIL       HIGH
+scanner.ooxml.relationship   OOXML_EXTERNAL_RELATIONSHIP      FAIL       MEDIUM
+scanner.image.trailing       IMAGE_TRAILING_DATA_DETECTED     FAIL       HIGH
+scanner.signature.embedded   EMBEDDED_EXECUTABLE_DETECTED     FAIL       CRITICAL
+scanner.polyglot             POLYGLOT_DETECTED                FAIL       CRITICAL
+
+5. DETECTOR SUITE COVERAGE: DETECTION & RESTRAINT
+--------------------------------------------------------------------------------
+The detectors exhibit both high detection sensitivity and structural restraint:
+- PE/MZ Executable Signatures:
+  - Detection: flags valid PE headers with correct e_lfanew pointer to 'PE\0\0' at offset > 0.
+  - Restraint: benign text containing ASCII "MZ" without valid PE structure returns PASS / CLEAN.
+- ELF Binary Signatures:
+  - Detection: flags valid ELF headers with valid ei_class, ei_data, ei_version, e_type at offset > 0.
+  - Restraint: benign buffers containing "\x7fELF" with invalid ident or e_type return PASS / CLEAN.
+- Mach-O Binary Signatures:
+  - Detection: flags 32-bit, 64-bit, and Fat Universal Mach-O with valid CPU type and filetype.
+  - Restraint: benign buffers with Mach-O magic bytes without valid CPU type or filetype return PASS / CLEAN.
+- Image Trailing Data:
+  - Detection: flags appended non-whitespace / non-null data after PNG IEND, JPEG EOI, GIF trailer.
+  - Restraint: benign JPEGs with permissible trailing whitespace / null bytes (< 32 bytes) return PASS / CLEAN.
+- OOXML Macros & Relations:
+  - Pure in-memory XML inspection, zero network access.
+  - Internal relationships (themes, styles, settings) return PASS / CLEAN.
+- Polyglot Matrix:
+  - poly-01 (GIF-ZIP), poly-02 (JPEG-ZIP), poly-03 (PDF-ZIP) detected.
+  - poly-04 documented heuristic miss.
+
+6. VERIFICATION STATUS
+--------------------------------------------------------------------------------
+- Unit Tests:        tests/unit/security-engine/format-checks.test.ts (33/33 PASS)
+- Integration Tests: tests/integration/scanner/p17-format-checks.test.ts (12/12 PASS)
+- API Tests:         tests/integration/api/p17-scans-api.test.ts (9/9 PASS)
+- Invariant Tests:   tests/integration/db/invariants.test.ts (15/15 PASS)
+- Full Project:      699/699 tests passed across 49 test suites
+
+GATE VERDICT: FULL PASS
+================================================================================

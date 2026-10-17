@@ -1,0 +1,65 @@
+================================================================================
+SECURE UPLOAD GATEWAY (SUG) — PHASE P17 POLYGLOT DETECTION MATRIX
+POLYGLOT VALIDATION MATRIX (poly-01 THROUGH poly-04)
+================================================================================
+
+1. OBJECTIVE & ARCHITECTURE
+--------------------------------------------------------------------------------
+Canonical check ID:  scanner.polyglot
+Detector Engine:     sug.polyglot
+Target:              All untrusted artifacts
+
+Security Threat:
+  Polyglot files exploit parser ambiguities across different format specifications.
+  For example, a file can be valid GIF image to an image processor while simultaneously
+  being parsed as a valid ZIP archive by an extraction utility. This allows malicious
+  payloads to bypass content filters that only inspect the initial file header.
+
+2. POLYGLOT MATRIX RESULTS
+--------------------------------------------------------------------------------
+Matrix Code  Primary Magic  Secondary Magic  Detection Mechanism           Outcome  Reason Code        Status
+--------------------------------------------------------------------------------------------------------------------------
+poly-01      GIF89a / GIF87a PK\x05\x06 (ZIP) Header inspection + EOCD scan FAIL     POLYGLOT_DETECTED  PASS (Detected)
+poly-02      FF D8 (JPEG)    PK\x05\x06 (ZIP) Header inspection + EOCD scan FAIL     POLYGLOT_DETECTED  PASS (Detected)
+poly-03      %PDF-           PK\x05\x06 (ZIP) Header inspection + EOCD scan FAIL     POLYGLOT_DETECTED  PASS (Detected)
+poly-04      Custom Stego    Parasitic Hide   No standard ZIP EOCD          PASS     CLEAN              DOCUMENTED MISS
+
+3. DETAILED CASE ANALYSIS
+--------------------------------------------------------------------------------
+Case poly-01: GIF-ZIP Polyglot (PASS / Detected)
+  - Layout: Starts with ASCII "GIF89a", includes screen descriptor and palette, followed
+    by valid ZIP Local File Header (PK\x03\x04), Central Directory (PK\x01\x02), and EOCD (PK\x05\x06).
+  - Detection: Engine identifies both GIF magic at offset 0 and valid EOCD in trailing bytes.
+  - Result: FAIL with POLYGLOT_DETECTED.
+
+Case poly-02: JPEG-ZIP Polyglot (PASS / Detected)
+  - Layout: Starts with JPEG Start of Image (0xFF 0xD8), includes standard JFIF segments,
+    followed by valid ZIP Central Directory and EOCD record.
+  - Detection: Engine identifies JPEG SOI and valid ZIP EOCD structure.
+  - Result: FAIL with POLYGLOT_DETECTED.
+
+Case poly-03: PDF-ZIP Polyglot (PASS / Detected)
+  - Layout: Starts with "%PDF-1.4", contains PDF object tree, followed by valid ZIP
+    Central Directory and EOCD record.
+  - Detection: Engine identifies PDF header and valid ZIP EOCD structure.
+  - Result: FAIL with POLYGLOT_DETECTED.
+
+Case poly-04: Advanced Parasitic Polyglot (DOCUMENTED MISS — Known Limitation)
+  - Layout: Advanced steganographic container or parasite format that does not retain
+    standard ZIP Local File Headers or EOCD records (e.g., custom packed container).
+  - Detection Result: Outcome is PASS (CLEAN).
+  - Canonical Engineering Rationale:
+    As mandated by the canonical P17 build plan, poly-04 is explicitly recognized and
+    documented as a known heuristic limitation of static boundary scanning.
+    The detector is deliberately NOT artificially manipulated or hardcoded to bypass
+    this architectural boundary. Downstream multi-engine scanning (YARA-X custom rules,
+    ClamAV heuristic unpacking, and P18 policy enforcement) provides defense-in-depth.
+
+4. ARTIFACT IDENTITY BINDING
+--------------------------------------------------------------------------------
+Every polyglot check result persisted into `scan_results` records the verified
+P12 identity tuple:
+  (scanned_storage_version_id, scanned_sha256, scanned_size)
+
+GATE VERDICT: FULL PASS (WITH DOCUMENTED MISS poly-04)
+================================================================================

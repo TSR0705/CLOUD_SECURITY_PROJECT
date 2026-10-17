@@ -80,3 +80,6 @@ export {
 
 // Archive Inspection Engine (P16 Two-Phase Safe ZIP / OOXML Inspection)
 export * from './archive/index.js';
+
+// Format Inspection Engines (P17 PDF, OOXML, Image, Embedded Signatures, Polyglots)
+export * from './format/index.js';
