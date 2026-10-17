@@ -1,10 +1,10 @@
 === PHASE P20 TEST SUMMARY ===
 Date: 2026-10-17
 Branch: phase/20-bound-promotion
-Target: Secure Upload Gateway Phase P20 — Trusted Storage and Exact-Artifact Promotion
+Target: Secure Upload Gateway Phase P20 — Trusted Storage, Safe Orphan Reconciliation, and Exact-Artifact Promotion
 
 Test Suites:
-1. tests/unit/promotion/promotion.test.ts (13 tests)
+1. tests/unit/promotion/promotion.test.ts (22 tests)
    - 1. toctou-01: Legitimate Clean File Promotion End-to-End
      * fetches bound version, encrypts with SUG1, writes clean storage, and atomically audits
    - 2. toctou-02: Source Object Replaced in Quarantine (Version Binding)
@@ -20,45 +20,72 @@ Test Suites:
      * rejects promotion when decision is superseded by a subsequent review or scan
    - 6. Fail-Closed on Key Provider / Encryption Error
      * halts immediately before clean storage write when key provider throws
-   - 7. Clean Storage Write Idempotency and Collision Handling
+   - 7. Clean Storage Write Idempotency and Safe Orphan Reconciliation
      * handles AlreadyExists idempotently if existing clean object ciphertext hash matches
      * fails with ALREADY_EXISTS if pre-existing clean object has conflicting ciphertext hash
+     * safely adopts pre-existing orphan object if decrypted content cryptographically matches bound SHA-256 and size
+     * rejects orphan adoption and fails closed if pre-existing object has conflicting plaintext
+     * treats 5xx transient storage errors during putIfAbsent as retryable STORAGE_FAILED
    - 8. Atomic Rollback and Cleanup on Audit Append Failure
      * rolls back database transaction and cleans up written clean storage object when audit fails
-   - 9. PromotionWorker Batch Claiming and Polling
+     * catches and logs audit errors when appending rejection audit events without crashing
+   - 9. PromotionWorker Lifecycle and Queue Processing
      * processes eligible claimed jobs and completes when queue is drained
+     * runs continuous polling loop and handles interval timer ticks
+     * gracefully logs and handles job claim errors
+     * gracefully logs and handles unhandled errors thrown during job promotion
+     * handles errors when enqueuing promotion jobs
 
-2. tests/unit/api/files.test.ts (18 tests)
-   - 1. GET /files/:id — Verify-Before-Release & Safe Headers
-     * decrypts verified clean object and streams plaintext with all security headers
-     * works identically via canonical /api/v1/files/:id path
-     * allows admin and analyst dashboard users to download promoted clean objects
-     * allows auditor dashboard users to download promoted clean objects
-   - 2. Verify-Before-Release: Tampered Ciphertext Rejection
-     * fails closed (500) and leaks zero plaintext when clean ciphertext envelope is tampered
-     * fails closed when auth tag is corrupted
-   - 3. Tenant Isolation & Access Control (authz-07)
-     * rejects cross-tenant download attempt (403 Forbidden)
-     * rejects cross-tenant delete attempt (403 Forbidden)
-   - 4. Status Guards & Non-Promoted Files
-     * returns 400 when attempting to download a QUARANTINED file
-     * returns 400 when attempting to download a BLOCKED file
-     * returns 404 Not Found when file has been soft deleted
-   - 5. DELETE /files/:id — Soft Delete & RBAC
-     * allows application owner API key to soft delete file
-     * allows admin users to delete files
-     * rejects analyst users from deleting files (403 Forbidden)
-     * returns 404 when deleting a non-existent file
-     * returns 204 idempotently when deleting an already deleted file
-   - 6. Authentication Failure Modes
-     * returns 401 when Authorization header is missing
-     * returns 401 when API key is invalid
+2. tests/integration/promotion/p20-promotion.test.ts (12 tests)
+   - Real PostgreSQL (`sug_admin`) + LocalStack S3 (`sug-quarantine-local`, `sug-clean-local`)
+   - 1. toctou-01: Legitimate Clean Artifact Promotion End-to-End
+     * promotes clean artifact from real quarantine to real clean storage and records database entities
+   - 2. toctou-02: Source Version Replaced in Quarantine (Exact Version Binding)
+     * promotes bound source version even if malicious version is uploaded under same key
+     * aborts and leaves clean storage empty if bound source version is deleted or missing
+   - 3. toctou-03: Content Mutated Under Same Version (SHA-256 Mismatch Rejection)
+     * rejects promotion immediately with HASH_MISMATCH and zero clean storage writes
+   - 4. toctou-04: Size Mismatch or Truncated Payload Rejection
+     * rejects promotion immediately with SIZE_MISMATCH when payload length differs from bound size
+   - 5. Priority 1: Storage/Database Consistency and Safe Orphan Reconciliation
+     * demonstrates clean storage write success followed by DB transaction failure, and safe orphan reconciliation on retry
+     * rejects adoption if pre-existing clean storage object has conflicting or unverified payload
+   - 6. Encryption / KEK Failure — Fail-Closed with Zero Plaintext Publication
+     * fails closed when KEK is missing or invalid, setting file to QUARANTINED with zero clean storage writes
+   - 7. Database & Audit Rollback Consistency
+     * rolls back entire database transaction and leaves file QUARANTINED if audit_append fails
+   - 8. Cross-Tenant Authorization Isolation (authz-07)
+     * rejects download or deletion of files belonging to other applications
+   - 9. Exact Artifact Tuple Binding & Status Guard
+     * rejects promotion of file with BLOCK decision
+   - 10. Real HTTP Route Integration: Verification, Download & Soft-Deletion
+     * full lifecycle: upload, evaluate, promote, download verified plaintext, soft-delete, and reject subsequent downloads
+
+3. tests/unit/api/files.test.ts (18 tests)
+   - 1. GET /files/:id — Verify-Before-Release & Safe Headers (4 tests)
+   - 2. Verify-Before-Release: Tampered Ciphertext Rejection (2 tests)
+   - 3. Tenant Isolation & Access Control (authz-07) (2 tests)
+   - 4. Status Guards & Non-Promoted Files (3 tests)
+   - 5. DELETE /files/:id — Soft Delete & RBAC (5 tests)
+   - 6. Authentication Failure Modes (2 tests)
+
+Coverage Report (services/promotion/src):
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files (promo)  |   98.76 |    77.94 |     100 |   99.37 |                   
+  index.ts         |     100 |      100 |     100 |     100 |                   
+  promoter.ts      |   99.13 |       76 |     100 |   99.13 | 454               
+  types.ts         |       0 |        0 |       0 |       0 |                   
+  worker.ts        |   97.72 |    83.33 |     100 |     100 | 63,116-124        
+-------------------|---------|----------|---------|---------|-------------------
 
 Summary Totals:
-  P20 Test Files: 2 passed (2)
-  P20 Tests: 31 passed (31)
-  Full Monorepo Unit Test Suite: 45 passed (45 test files, 726 tests passed)
+  P20 Unit Suite: 22 passed (22 tests)
+  P20 Integration Suite: 12 passed (12 tests)
+  Full Monorepo Unit Test Suite: 45 passed (45 test files, 735 tests passed)
   TypeScript Typecheck: 0 errors (tsc -b clean)
   ESLint: 0 errors, 0 warnings (eslint . clean)
-  Prettier: All files match code style
-  OpenAPI Schema: docs/openapi.json in sync and validated
+  Prettier: All files match code style (prettier --check . clean)
+  OpenAPI Schema: docs/openapi.json in sync and validated (node scripts/generate-openapi.mjs --check clean)
+  Package Builds: All packages built and clean

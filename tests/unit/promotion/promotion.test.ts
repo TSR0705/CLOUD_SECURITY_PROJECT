@@ -17,8 +17,19 @@
 import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LocalKeyProvider, DEFAULT_LOCAL_KEY_REFERENCE, decryptBuffer } from '@sug/crypto';
-import { AlreadyExists, VersionMissing, NotFound, type StorageProvider } from '@sug/storage';
+import {
+  LocalKeyProvider,
+  DEFAULT_LOCAL_KEY_REFERENCE,
+  decryptBuffer,
+  encryptBuffer,
+} from '@sug/crypto';
+import {
+  AlreadyExists,
+  VersionMissing,
+  NotFound,
+  StorageError,
+  type StorageProvider,
+} from '@sug/storage';
 import {
   PromotionService,
   PromotionWorker,
@@ -146,7 +157,7 @@ describe('Phase P20: Trusted Storage & Exact-Artifact Promotion', () => {
     const cleanObjects = new Map<string, { body: Buffer; metadata?: Record<string, string> }>();
 
     const storageProvider: StorageProvider = {
-      headObject: vi.fn(async ({ bucket, key }) => {
+      head: vi.fn(async ({ bucket, key }) => {
         const fullKey = `${bucket}/${key}`;
         const obj = cleanObjects.get(fullKey);
         if (!obj) {
@@ -155,31 +166,24 @@ describe('Phase P20: Trusted Storage & Exact-Artifact Promotion', () => {
         return {
           bucket,
           key,
-          sizeBytes: obj.body.length,
+          contentLength: obj.body.length,
           etag: 'etag-123',
           versionId: 'clean-ver-001',
-          lastModified: new Date(),
-        };
-      }),
-      getObject: vi.fn(async ({ bucket, key }) => {
-        const fullKey = `${bucket}/${key}`;
-        const obj = cleanObjects.get(fullKey);
-        if (!obj) {
-          throw new NotFound(`Object ${key} not found`);
-        }
-        return {
-          body: createStream(obj.body),
-          metadata: {
-            bucket,
-            key,
-            sizeBytes: obj.body.length,
-            etag: 'etag-123',
-            versionId: 'clean-ver-001',
-            lastModified: new Date(),
-          },
         };
       }),
       getByVersion: vi.fn(async ({ bucket, key, versionId: requestedVersion }) => {
+        const fullKey = `${bucket}/${key}`;
+        if (cleanObjects.has(fullKey)) {
+          const obj = cleanObjects.get(fullKey)!;
+          return {
+            body: createStream(obj.body),
+            bucket,
+            key,
+            contentLength: obj.body.length,
+            versionId: requestedVersion,
+            etag: 'etag-clean',
+          };
+        }
         if (requestedVersion !== versionId) {
           throw new VersionMissing(`Version ${requestedVersion} not found for ${key}`);
         }
@@ -193,6 +197,10 @@ describe('Phase P20: Trusted Storage & Exact-Artifact Promotion', () => {
             versionId: requestedVersion,
             lastModified: new Date(),
           },
+          bucket,
+          key,
+          versionId: requestedVersion,
+          contentLength: plaintext.length,
         };
       }),
       putObject: vi.fn(async ({ bucket, key, body, metadata }) => {
@@ -493,6 +501,35 @@ describe('Phase P20: Trusted Storage & Exact-Artifact Promotion', () => {
       expect(result.error).toContain('does not match bound size');
       expect(storageProvider.putIfAbsent).not.toHaveBeenCalled();
     });
+
+    it('catches and logs warning if audit_append throws during promotion rejection', async () => {
+      const { job } = createJobFixture();
+      const mutatedPlaintext = Buffer.from('Hacked payload', 'utf8');
+      const mockDb = createMockDb();
+      const { storageProvider } = createMockStorageProvider(
+        mutatedPlaintext,
+        job.boundStorageVersionId,
+      );
+      mockDb.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+        mockDb.executedQueries.push({ sql, params });
+        if (sql.includes('audit_append') && sql.includes('PROMOTION_REJECTED')) {
+          throw new Error('Audit table disk full');
+        }
+        if (sql.includes('FROM security_decisions WHERE supersedes_id = $1')) {
+          return { rows: [], rowCount: 0 };
+        }
+        return { rows: [], rowCount: 1 };
+      });
+      const promoter = new PromotionService({
+        db: mockDb,
+        storageProvider,
+        cleanBucket: 'sug-clean-vault',
+        keyProvider,
+      });
+      const result = await promoter.promote(job);
+      expect(result.success).toBe(false);
+      expect(result.outcome).toBe('HASH_MISMATCH');
+    });
   });
 
   describe('5. Non-ALLOW and Superseded Decision Rejection', () => {
@@ -705,6 +742,127 @@ describe('Phase P20: Trusted Storage & Exact-Artifact Promotion', () => {
       expect(result.outcome).toBe('ALREADY_EXISTS');
       expect(result.error).toContain('Clean object already exists');
     });
+
+    it('safely reconciles orphan clean storage object when putIfAbsent throws AlreadyExists and envelope cryptographic validation passes', async () => {
+      const { job, plaintext } = createJobFixture();
+      const mockDb = createMockDb();
+      const { storageProvider, cleanObjects } = createMockStorageProvider(
+        plaintext,
+        job.boundStorageVersionId,
+      );
+
+      // Pre-encrypt valid envelope with matching bound AAD
+      const encrypted = await encryptBuffer(plaintext, {
+        keyProvider,
+        aad: {
+          appId: job.applicationId,
+          fileId: job.fileId,
+          storageVersionId: job.boundStorageVersionId,
+          sha256Plaintext: job.boundSha256,
+        },
+        keyReference: DEFAULT_LOCAL_KEY_REFERENCE,
+      });
+
+      const cleanObjectKey = `objects/${job.applicationId}/${job.fileId}`;
+      cleanObjects.set(`sug-clean-vault/${cleanObjectKey}`, {
+        body: encrypted.serialized,
+        metadata: {},
+      });
+
+      // putIfAbsent throws AlreadyExists
+      storageProvider.putIfAbsent = vi
+        .fn()
+        .mockRejectedValue(new AlreadyExists('Object already exists'));
+
+      const promoter = new PromotionService({
+        db: mockDb,
+        storageProvider,
+        cleanBucket: 'sug-clean-vault',
+        keyProvider,
+      });
+
+      const result = await promoter.promote(job);
+
+      expect(result.success).toBe(true);
+      expect(result.outcome).toBe('PROMOTED');
+      expect(result.cleanObjectKey).toBe(cleanObjectKey);
+
+      // Verify that cloud_objects was inserted with the reconciled object's details
+      const insertCloudObj = mockDb.executedQueries.find((q) =>
+        q.sql.includes('INSERT INTO cloud_objects'),
+      );
+      expect(insertCloudObj).toBeDefined();
+
+      // Verify that file was marked PROMOTED
+      const filePromoted = mockDb.executedQueries.find((q) =>
+        q.sql.includes("UPDATE files SET status = 'PROMOTED'"),
+      );
+      expect(filePromoted).toBeDefined();
+    });
+
+    it('fails with ALREADY_EXISTS when existing clean object cannot be decrypted or hash mismatches', async () => {
+      const { job, plaintext } = createJobFixture();
+      const mockDb = createMockDb();
+      const { storageProvider, cleanObjects } = createMockStorageProvider(
+        plaintext,
+        job.boundStorageVersionId,
+      );
+
+      const cleanObjectKey = `objects/${job.applicationId}/${job.fileId}`;
+      // Put completely invalid / un-decryptable envelope in clean storage
+      cleanObjects.set(`sug-clean-vault/${cleanObjectKey}`, {
+        body: Buffer.from('NOT_A_VALID_SUG1_ENVELOPE', 'utf8'),
+        metadata: {},
+      });
+
+      storageProvider.putIfAbsent = vi
+        .fn()
+        .mockRejectedValue(new AlreadyExists('Object already exists'));
+
+      const promoter = new PromotionService({
+        db: mockDb,
+        storageProvider,
+        cleanBucket: 'sug-clean-vault',
+        keyProvider,
+      });
+
+      const result = await promoter.promote(job);
+
+      expect(result.success).toBe(false);
+      expect(result.outcome).toBe('ALREADY_EXISTS');
+
+      const fileError = mockDb.executedQueries.find((q) =>
+        q.sql.includes("UPDATE files SET status = 'ERROR'"),
+      );
+      expect(fileError).toBeDefined();
+    });
+
+    it('fails with STORAGE_FAILED on transient 500/503 storage errors and sets file status QUARANTINED', async () => {
+      const { job, plaintext } = createJobFixture();
+      const mockDb = createMockDb();
+      const { storageProvider } = createMockStorageProvider(plaintext, job.boundStorageVersionId);
+
+      storageProvider.putIfAbsent = vi
+        .fn()
+        .mockRejectedValue(new StorageError('Service Unavailable', 503));
+
+      const promoter = new PromotionService({
+        db: mockDb,
+        storageProvider,
+        cleanBucket: 'sug-clean-vault',
+        keyProvider,
+      });
+
+      const result = await promoter.promote(job);
+
+      expect(result.success).toBe(false);
+      expect(result.outcome).toBe('STORAGE_FAILED');
+
+      const fileQuarantined = mockDb.executedQueries.find((q) =>
+        q.sql.includes("UPDATE files SET status = 'QUARANTINED'"),
+      );
+      expect(fileQuarantined).toBeDefined();
+    });
   });
 
   describe('8. Atomic Rollback and Cleanup on Audit Append Failure', () => {
@@ -810,6 +968,158 @@ describe('Phase P20: Trusted Storage & Exact-Artifact Promotion', () => {
       // Running once more on empty queue processes 0
       const run2 = await worker.runOnce();
       expect(run2.worked).toBe(false);
+    });
+
+    it('handles enqueue error gracefully in runOnce()', async () => {
+      const mockDb = createMockDb();
+      const { storageProvider } = createMockStorageProvider(Buffer.from('test'));
+
+      mockDb.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO promotion_jobs')) {
+          throw new Error('Database read-only or lock timeout');
+        }
+        if (sql.includes('WITH next_job AS')) {
+          return { rows: [], rowCount: 0 };
+        }
+        return { rows: [], rowCount: 0 };
+      });
+
+      const worker = new PromotionWorker({
+        db: mockDb,
+        storageProvider,
+        cleanBucket: 'sug-clean-vault',
+        keyProvider,
+      });
+
+      const res = await worker.runOnce();
+      expect(res.worked).toBe(false);
+    });
+
+    it('handles claim error gracefully in runOnce()', async () => {
+      const mockDb = createMockDb();
+      const { storageProvider } = createMockStorageProvider(Buffer.from('test'));
+
+      mockDb.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH next_job AS')) {
+          throw new Error('Connection pool exhausted');
+        }
+        return { rows: [], rowCount: 0 };
+      });
+
+      const worker = new PromotionWorker({
+        db: mockDb,
+        storageProvider,
+        cleanBucket: 'sug-clean-vault',
+        keyProvider,
+      });
+
+      const res = await worker.runOnce();
+      expect(res.worked).toBe(false);
+    });
+
+    it('handles unhandled exception during promotion in runOnce()', async () => {
+      const { job, plaintext } = createJobFixture();
+      const mockDb = createMockDb();
+      const { storageProvider } = createMockStorageProvider(plaintext, job.boundStorageVersionId);
+
+      mockDb.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH next_job AS')) {
+          return {
+            rows: [
+              {
+                id: job.id,
+                decision_id: job.decisionId,
+                file_version_id: job.fileVersionId,
+                file_id: job.fileId,
+                application_id: job.applicationId,
+                status: 'RUNNING',
+                attempts: 1,
+                run_after: new Date(),
+                locked_by: 'worker-1',
+                locked_at: new Date(),
+                decision: 'ALLOW',
+                bound_bucket: job.boundBucket,
+                bound_key: job.boundKey,
+                bound_storage_version_id: job.boundStorageVersionId,
+                bound_sha256: job.boundSha256,
+                bound_size: job.boundSize,
+                display_filename: 'payroll.pdf',
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        throw new Error('Fatal unhandled error inside promote');
+      });
+
+      const worker = new PromotionWorker({
+        db: mockDb,
+        storageProvider,
+        cleanBucket: 'sug-clean-vault',
+        keyProvider,
+      });
+
+      const res = await worker.runOnce();
+      expect(res.worked).toBe(true);
+      expect(res.result?.success).toBe(false);
+      expect(res.result?.outcome).toBe('FAILED');
+    });
+
+    it('supports worker lifecycle start(), stop(), and getWorkerId()', async () => {
+      vi.useFakeTimers();
+      try {
+        const mockDb = createMockDb();
+        const { storageProvider } = createMockStorageProvider(Buffer.from('test'));
+
+        const worker = new PromotionWorker({
+          db: mockDb,
+          storageProvider,
+          cleanBucket: 'sug-clean-vault',
+          keyProvider,
+          workerId: 'custom-worker-id',
+          pollIntervalMs: 50,
+        });
+
+        expect(worker.getWorkerId()).toBe('custom-worker-id');
+
+        worker.start();
+        // Calling start again when already running is a no-op
+        worker.start();
+
+        // Advance timer so poll() executes
+        await vi.advanceTimersByTimeAsync(60);
+
+        worker.stop();
+        // Calling stop again when already stopped is safe
+        worker.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('handles error in poll() loop iteration gracefully', async () => {
+      vi.useFakeTimers();
+      try {
+        const mockDb = createMockDb();
+        const { storageProvider } = createMockStorageProvider(Buffer.from('test'));
+
+        const worker = new PromotionWorker({
+          db: mockDb,
+          storageProvider,
+          cleanBucket: 'sug-clean-vault',
+          keyProvider,
+          pollIntervalMs: 50,
+        });
+
+        // Mock runOnce throwing to trigger catch in poll()
+        vi.spyOn(worker, 'runOnce').mockRejectedValue(new Error('Fatal poll crash'));
+
+        worker.start();
+        await vi.advanceTimersByTimeAsync(60);
+        worker.stop();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

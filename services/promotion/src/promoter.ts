@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import type { DatabaseExecutor } from '@sug/shared';
 import { timingSafeSha256Equal, completePromotionJob, failPromotionJob } from '@sug/shared';
 import { AlreadyExists, VersionMissing, NotFound, StorageError } from '@sug/storage';
-import { encryptBuffer } from '@sug/crypto';
+import { encryptBuffer, decryptBuffer, parseSug1Header, extractCiphertext } from '@sug/crypto';
 import type {
   ClaimedPromotionJob,
   PromotionResult,
@@ -317,7 +317,7 @@ export class PromotionService {
         );
 
         if (existingCloudObj.rows.length > 0) {
-          // Idempotent recovery: object already recorded for this version
+          // Idempotent recovery: object already recorded in DB for this version
           await completePromotionJob(executor, job.id, 'PROMOTED');
           await executor.query(`UPDATE files SET status = 'PROMOTED' WHERE id = $1`, [job.fileId]);
 
@@ -335,45 +335,125 @@ export class PromotionService {
           };
         }
 
-        await failPromotionJob(executor, job.id, {
-          error: `Clean storage key '${cleanObjectKey}' already exists and does not match current version`,
-          outcome: 'ALREADY_EXISTS',
-          retryable: false,
+        // Safe Orphan Reconciliation:
+        // Storage write previously succeeded, but database transaction rolled back or crashed before commit.
+        // We never assume DB rollback reverses object storage. Instead, verify the existing envelope cryptographically.
+        let isReconciledOrphan = false;
+        try {
+          const headRes = await this.storageProvider.head({
+            bucket: this.cleanBucket,
+            key: cleanObjectKey,
+          });
+
+          if (headRes.versionId) {
+            const getExisting = await this.storageProvider.getByVersion({
+              bucket: this.cleanBucket,
+              key: cleanObjectKey,
+              versionId: headRes.versionId,
+            });
+
+            const chunks: Buffer[] = [];
+            for await (const chunk of getExisting.body) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            }
+            const existingEnvelope = Buffer.concat(chunks);
+
+            // Cryptographically verify existing envelope using decryptBuffer and exact bound AAD
+            const decryptedExisting = await decryptBuffer(existingEnvelope, {
+              keyProvider: this.keyProvider,
+              aad: {
+                appId: job.applicationId,
+                fileId: job.fileId,
+                storageVersionId: job.boundStorageVersionId,
+                sha256Plaintext: job.boundSha256,
+              },
+            });
+
+            const existingPlainSha = crypto
+              .createHash('sha256')
+              .update(decryptedExisting)
+              .digest('hex');
+            if (timingSafeSha256Equal(existingPlainSha, job.boundSha256)) {
+              this.logger?.info(
+                'Safely reconciled orphan clean storage object from prior attempt',
+                {
+                  cleanObjectKey,
+                  cleanStorageVersionId: headRes.versionId,
+                },
+              );
+
+              isReconciledOrphan = true;
+              putResult = {
+                bucket: this.cleanBucket,
+                key: cleanObjectKey,
+                versionId: headRes.versionId,
+                etag: headRes.etag,
+                size: existingEnvelope.length,
+              };
+              cipherShaHex = crypto.createHash('sha256').update(existingEnvelope).digest('hex');
+              const parsedHeader = parseSug1Header(existingEnvelope);
+              const parsedCiphertext = extractCiphertext(existingEnvelope, parsedHeader);
+              encrypted = {
+                serialized: existingEnvelope,
+                ciphertext: parsedCiphertext,
+                header: parsedHeader,
+                keyReference: this.kekId,
+              };
+            }
+          }
+        } catch (orphanErr) {
+          this.logger?.warn('Failed to verify or adopt existing clean storage object', {
+            error: (orphanErr as Error).message,
+          });
+        }
+
+        if (!isReconciledOrphan) {
+          await failPromotionJob(executor, job.id, {
+            error: `Clean storage key '${cleanObjectKey}' already exists with conflicting or unverified content`,
+            outcome: 'ALREADY_EXISTS',
+            retryable: false,
+          });
+
+          await executor.query(`UPDATE files SET status = 'ERROR' WHERE id = $1`, [job.fileId]);
+
+          return {
+            success: false,
+            outcome: 'ALREADY_EXISTS',
+            fileId: job.fileId,
+            fileVersionId: job.fileVersionId,
+            error: 'Clean object already exists',
+          };
+        }
+      } else {
+        // Transient or unexpected storage error
+        this.logger?.error('Storage putIfAbsent failed during clean publication', {
+          error: (putErr as Error).message,
         });
 
-        await executor.query(`UPDATE files SET status = 'ERROR' WHERE id = $1`, [job.fileId]);
+        const isRetryable = putErr instanceof StorageError ? putErr.statusCode >= 500 : true;
+
+        await failPromotionJob(executor, job.id, {
+          error: (putErr as Error).message,
+          outcome: 'STORAGE_FAILED',
+          retryable: isRetryable,
+        });
+
+        await executor.query(`UPDATE files SET status = 'QUARANTINED' WHERE id = $1`, [job.fileId]);
 
         return {
           success: false,
-          outcome: 'ALREADY_EXISTS',
+          outcome: 'STORAGE_FAILED',
           fileId: job.fileId,
           fileVersionId: job.fileVersionId,
-          error: 'Clean object already exists',
+          error: (putErr as Error).message,
         };
       }
+    }
 
-      // Transient or unexpected storage error
-      this.logger?.error('Storage putIfAbsent failed during clean publication', {
-        error: (putErr as Error).message,
-      });
-
-      const isRetryable = putErr instanceof StorageError ? putErr.statusCode >= 500 : true;
-
-      await failPromotionJob(executor, job.id, {
-        error: (putErr as Error).message,
-        outcome: 'STORAGE_FAILED',
-        retryable: isRetryable,
-      });
-
-      await executor.query(`UPDATE files SET status = 'QUARANTINED' WHERE id = $1`, [job.fileId]);
-
-      return {
-        success: false,
-        outcome: 'STORAGE_FAILED',
-        fileId: job.fileId,
-        fileVersionId: job.fileVersionId,
-        error: (putErr as Error).message,
-      };
+    if (!putResult) {
+      throw new Error(
+        'Unexpected: putResult must be defined when progressing to database transaction',
+      );
     }
 
     // 7. Atomic Database Transaction: cloud_objects, files, promotion_jobs, audit_append
