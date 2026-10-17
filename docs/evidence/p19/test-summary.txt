@@ -106,7 +106,7 @@ Statements: 90.54%, Functions: 100%, Branch: 86.44%, Lines: 90.54%.
 --------------------------------------------------------------------------------
 Command: pnpm vitest run tests/unit/
 Test Files: 43 passed (43)
-Tests:      699 passed (699)
+Tests:      695 passed (695)
 Failures:   0
 Regressions: 0 (All P1 through P18 unit tests remain green)
 
