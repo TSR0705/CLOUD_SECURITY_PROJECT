@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import * as jose from 'jose';
 import { createApp } from '../../../services/api/src/app.js';
 import {
   hashPassword,
@@ -14,6 +13,7 @@ import {
   derivePublicKeyPem,
   JWT_AUDIENCE,
   JWT_ISSUER,
+  jose,
 } from '../../../services/api/src/auth/jwt.js';
 import { UserService } from '../../../services/api/src/auth/user-service.js';
 import type {

@@ -2,6 +2,7 @@ import * as jose from 'jose';
 import crypto from 'node:crypto';
 import type { DashboardJwtPayload, SafeUser, UserRole } from './user-types.js';
 
+export { jose };
 export const JWT_ISSUER = 'sug-api';
 export const JWT_AUDIENCE = 'sug-dashboard';
 export const ACCESS_TOKEN_EXPIRATION_SECONDS = 900; // 15 minutes (RFC 8725 short-lived access tokens)
