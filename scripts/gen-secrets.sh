@@ -105,6 +105,17 @@ if [ ! -f "$SECRETS_DIR/aws_secret_access_key" ]; then
   fi
 fi
 
+# 7. Generate Per-Service AWS Secret Access Keys (API, Scanner, Promoter, Replicator)
+for svc in api scanner promoter replicator; do
+  if [ ! -f "$SECRETS_DIR/aws_secret_access_key_${svc}" ]; then
+    if [ "$USE_OPENSSL" -eq 1 ]; then
+      openssl rand -base64 30 > "$SECRETS_DIR/aws_secret_access_key_${svc}"
+    else
+      node -e "process.stdout.write(require('node:crypto').randomBytes(30).toString('base64'))" > "$SECRETS_DIR/aws_secret_access_key_${svc}"
+    fi
+  fi
+done
+
 # Restrict file permissions where supported
 chmod 600 "$SECRETS_DIR"/* 2>/dev/null || true
 
