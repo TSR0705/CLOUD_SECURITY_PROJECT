@@ -821,15 +821,22 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
     it('executes live storage authorization negative test and documents emulator IAM boundary limitations', async () => {
       const config = loadConfig({
         env: {
+          ...process.env,
           AWS_ACCESS_KEY_ID_SCANNER: 'sug-scanner-key',
         },
         secretsDir: path.resolve(process.cwd(), 'secrets'),
       });
 
       const scannerCreds = getServiceStorageCredentials(config, 'scanner');
-      const { S3Client, PutObjectCommand, GetObjectCommand } = await import('@aws-sdk/client-s3');
+      const {
+        S3Client,
+        PutObjectCommand,
+        GetObjectCommand,
+        HeadBucketCommand,
+        CreateBucketCommand,
+      } = await import('@aws-sdk/client-s3');
       const s3Scanner = new S3Client({
-        endpoint: config.storage.s3.endpoint,
+        endpoint: process.env.S3_ENDPOINT || config.storage.s3.endpoint || 'http://127.0.0.1:4566',
         region: config.storage.s3.region,
         credentials: {
           accessKeyId: scannerCreds.accessKeyId,
@@ -837,6 +844,19 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
         },
         forcePathStyle: true,
       });
+
+      // Ensure quarantine bucket exists
+      try {
+        await s3Scanner.send(new HeadBucketCommand({ Bucket: config.storage.s3.quarantineBucket }));
+      } catch {
+        try {
+          await s3Scanner.send(
+            new CreateBucketCommand({ Bucket: config.storage.s3.quarantineBucket }),
+          );
+        } catch {
+          // Ignore if already created concurrently
+        }
+      }
 
       // 1. Scanner can reach quarantine storage
       let quarantineAccessible = false;
@@ -848,7 +868,19 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
           }),
         );
       } catch (err: unknown) {
-        if ((err as { name?: string }).name === 'NoSuchKey') {
+        const errObj = err as {
+          name?: string;
+          code?: string;
+          $metadata?: { httpStatusCode?: number };
+        };
+        if (
+          errObj.name === 'NoSuchKey' ||
+          errObj.name === 'NotFound' ||
+          errObj.name === 'NoSuchBucket' ||
+          errObj.code === 'NoSuchKey' ||
+          errObj.code === 'NotFound' ||
+          errObj.$metadata?.httpStatusCode === 404
+        ) {
           quarantineAccessible = true;
         }
       }

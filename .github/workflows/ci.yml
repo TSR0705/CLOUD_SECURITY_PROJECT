@@ -94,6 +94,7 @@ jobs:
         env:
           POSTGRES_PORT: 5432
           POSTGRES_HOST: 127.0.0.1
+          S3_ENDPOINT: http://127.0.0.1:4566
         run: pnpm test
 
       - name: Stop infrastructure services
