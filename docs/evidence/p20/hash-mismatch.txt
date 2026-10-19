@@ -1,0 +1,45 @@
+=== P20 HASH MISMATCH ADVERSARIAL TEST EVIDENCE ===
+Date: 2026-10-17
+Branch: phase/20-bound-promotion
+Target: Secure Upload Gateway Phase P20 — Anti-TOCTOU Hash Recomputation & Fail-Closed Guard
+
+Scenario:
+Adversary or malicious process replaces artifact payload in quarantine bucket after ALLOW security decision is recorded.
+Bound Tuple in Decision:
+  - Bucket: sug-quarantine-test
+  - Object Key: incoming/app-1/upload-1
+  - Version ID: q-ver-001
+  - Bound SHA-256: 622dd8aa4d693bf69ecb001a1dbcb9562725fa845187e5b22b62b6cdb4231b14 (Official approved payroll report content 2026)
+  - Bound Size: 45 bytes
+
+Adversarial Injected Content:
+  - Payload: "Hacked payload injected into quarantine storage"
+  - Computed SHA-256: 15e6123e748fc1a14a938fc287413693e5ec7fe8a32bb4542d225dc1ad009e4f
+  - Injected Size: 47 bytes
+
+Execution Log Trace:
+  [INFO] Re-fetching bound source artifact from quarantine { bucket: 'sug-quarantine-test', key: 'incoming/app-1/upload-1', versionId: 'q-ver-001' }
+  [ERROR] TOCTOU violation detected during promotion: HASH_MISMATCH {
+    jobId: '...',
+    fileId: '...',
+    boundSha: '622dd8aa4d693bf69ecb001a1dbcb9562725fa845187e5b22b62b6cdb4231b14',
+    actualSha: '15e6123e748fc1a14a938fc287413693e5ec7fe8a32bb4542d225dc1ad009e4f',
+    boundSize: 45,
+    actualSize: 47
+  }
+  [AUDIT] Action: PROMOTION_REJECTED
+  [AUDIT] Refs: { application_id: '...', file_id: '...', decision_id: '...' }
+  [AUDIT] Details: {
+    reason: 'HASH_MISMATCH',
+    expected_sha256: '622dd8aa4d693bf69ecb001a1dbcb9562725fa845187e5b22b62b6cdb4231b14',
+    actual_sha256: '15e6123e748fc1a14a938fc287413693e5ec7fe8a32bb4542d225dc1ad009e4f',
+    bound_storage_version_id: 'q-ver-001'
+  }
+  [DB] UPDATE files SET status = 'BLOCKED' WHERE id = $1
+  [DB] UPDATE promotion_jobs SET status = 'FAILED', outcome = 'HASH_MISMATCH' WHERE id = $1
+
+Invariants Verified:
+  1. Clean storage putIfAbsent: NEVER CALLED (zero ciphertext written)
+  2. Crypto envelope encryption: NEVER CALLED (zero KEK/DEK operations)
+  3. File status: Transitioned to 'BLOCKED'
+  4. Audit log: Complete audit trail recorded with expected vs actual digest

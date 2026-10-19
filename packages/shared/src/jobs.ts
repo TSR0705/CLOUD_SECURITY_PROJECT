@@ -455,3 +455,236 @@ export async function reapExpiredJobs(
     reapedJobIds,
   };
 }
+
+export interface ClaimedPromotionJob {
+  id: string;
+  decisionId: string;
+  fileVersionId: string;
+  fileId: string;
+  applicationId: string;
+  status: 'RUNNING';
+  attempts: number;
+  maxAttempts: number;
+  runAfter: Date;
+  lockedBy: string;
+  lockedAt: Date;
+  decision: string;
+  boundBucket: string;
+  boundKey: string;
+  boundStorageVersionId: string;
+  boundSha256: string;
+  boundSize: number;
+  displayFilename: string;
+}
+
+/**
+ * Enqueues eligible un-superseded ALLOW decisions into promotion_jobs.
+ */
+export async function enqueueEligiblePromotionJobs(
+  db: DatabaseExecutor,
+  options: { now?: () => Date; limit?: number } = {},
+): Promise<number> {
+  const limit = options.limit ?? 100;
+  const insertSql = `
+    INSERT INTO promotion_jobs (decision_id, status)
+    SELECT sd.id, 'QUEUED'
+    FROM security_decisions sd
+    WHERE sd.decision = 'ALLOW'
+      AND NOT EXISTS (
+        SELECT 1 FROM security_decisions s2 WHERE s2.supersedes_id = sd.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM promotion_jobs pj WHERE pj.decision_id = sd.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM cloud_objects co WHERE co.file_version_id = sd.file_version_id AND co.zone = 'clean'
+      )
+    ORDER BY sd.created_at ASC
+    LIMIT $1
+    ON CONFLICT (decision_id) DO NOTHING
+    RETURNING id;
+  `;
+  const res = await db.query(insertSql, [limit]);
+  return res.rowCount ?? res.rows.length;
+}
+
+/**
+ * Atomically claims the next eligible QUEUED promotion job using PostgreSQL FOR UPDATE SKIP LOCKED.
+ */
+export async function claimPromotionJob(
+  db: DatabaseExecutor,
+  options: ClaimOptions,
+): Promise<ClaimedPromotionJob | null> {
+  const now = options.now ? options.now() : new Date();
+  const workerId = options.workerId;
+
+  if (!workerId || !workerId.trim()) {
+    throw new Error('Worker ID is required to claim a promotion job');
+  }
+
+  const queryText = `
+    WITH next_job AS (
+      SELECT pj.id, pj.decision_id
+      FROM promotion_jobs pj
+      WHERE pj.status = 'QUEUED'
+        AND pj.run_after <= $1
+      ORDER BY pj.run_after ASC, pj.created_at ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE promotion_jobs
+    SET status = 'RUNNING',
+        locked_by = $2,
+        locked_at = $1,
+        attempts = promotion_jobs.attempts + 1
+    FROM next_job, security_decisions sd, file_versions fv, files f
+    WHERE promotion_jobs.id = next_job.id
+      AND sd.id = next_job.decision_id
+      AND fv.id = sd.file_version_id
+      AND f.id = fv.file_id
+    RETURNING
+      promotion_jobs.id,
+      promotion_jobs.decision_id,
+      sd.file_version_id,
+      fv.file_id,
+      f.application_id,
+      promotion_jobs.status,
+      promotion_jobs.attempts,
+      promotion_jobs.run_after,
+      promotion_jobs.locked_by,
+      promotion_jobs.locked_at,
+      sd.decision,
+      sd.bound_bucket,
+      sd.bound_key,
+      sd.bound_storage_version_id,
+      sd.bound_sha256,
+      sd.bound_size,
+      f.display_filename;
+  `;
+
+  const res = await db.query<{
+    id: string;
+    decision_id: string;
+    file_version_id: string;
+    file_id: string;
+    application_id: string;
+    status: JobStatus;
+    attempts: number;
+    run_after: Date | string;
+    locked_by: string;
+    locked_at: Date | string;
+    decision: string;
+    bound_bucket: string;
+    bound_key: string;
+    bound_storage_version_id: string;
+    bound_sha256: Buffer | string;
+    bound_size: string | number;
+    display_filename: string;
+  }>(queryText, [now, workerId]);
+
+  if (res.rows.length === 0) {
+    return null;
+  }
+
+  const row = res.rows[0]!;
+
+  const sha256Hex = Buffer.isBuffer(row.bound_sha256)
+    ? row.bound_sha256.toString('hex').toLowerCase()
+    : typeof row.bound_sha256 === 'string'
+      ? row.bound_sha256.replace(/^(?:0x|\\x)/i, '').toLowerCase()
+      : '';
+
+  return {
+    id: row.id,
+    decisionId: row.decision_id,
+    fileVersionId: row.file_version_id,
+    fileId: row.file_id,
+    applicationId: row.application_id,
+    status: 'RUNNING',
+    attempts: Number(row.attempts),
+    maxAttempts: 3,
+    runAfter: new Date(row.run_after),
+    lockedBy: row.locked_by,
+    lockedAt: new Date(row.locked_at),
+    decision: row.decision,
+    boundBucket: row.bound_bucket,
+    boundKey: row.bound_key,
+    boundStorageVersionId: row.bound_storage_version_id,
+    boundSha256: sha256Hex,
+    boundSize: Number(row.bound_size),
+    displayFilename: row.display_filename,
+  };
+}
+
+/**
+ * Marks a claimed promotion job as SUCCEEDED.
+ */
+export async function completePromotionJob(
+  db: DatabaseExecutor,
+  id: string,
+  outcome: string = 'PROMOTED',
+  options: CompleteOptions = {},
+): Promise<void> {
+  const now = options.now ? options.now() : new Date();
+  await db.query(
+    `UPDATE promotion_jobs
+     SET status = 'SUCCEEDED',
+         outcome = $2,
+         finished_at = $3,
+         locked_by = NULL,
+         locked_at = NULL
+     WHERE id = $1`,
+    [id, outcome, now],
+  );
+}
+
+/**
+ * Transitions a failed promotion job to QUEUED (with backoff) or FAILED.
+ */
+export async function failPromotionJob(
+  db: DatabaseExecutor,
+  id: string,
+  options: FailOptions & { outcome?: string; maxAttempts?: number },
+): Promise<void> {
+  const now = options.now ? options.now() : new Date();
+  const errorMessage =
+    options.error instanceof Error ? options.error.message : String(options.error);
+  const outcome = options.outcome ?? 'FAILED';
+  const retryable = options.retryable ?? false;
+  const maxAttempts = options.maxAttempts ?? 3;
+
+  if (retryable) {
+    const jobRes = await db.query<{ attempts: number }>(
+      `SELECT attempts FROM promotion_jobs WHERE id = $1`,
+      [id],
+    );
+    const attempts = jobRes.rows[0]?.attempts ?? 1;
+    if (attempts < maxAttempts) {
+      const delayMs = options.backoffMs ?? calculateBackoff(attempts);
+      const nextRunAfter = new Date(now.getTime() + delayMs);
+      await db.query(
+        `UPDATE promotion_jobs
+         SET status = 'QUEUED',
+             run_after = $2,
+             locked_by = NULL,
+             locked_at = NULL,
+             last_error = $3
+         WHERE id = $1`,
+        [id, nextRunAfter, errorMessage],
+      );
+      return;
+    }
+  }
+
+  await db.query(
+    `UPDATE promotion_jobs
+     SET status = 'FAILED',
+         finished_at = $2,
+         last_error = $3,
+         outcome = $4,
+         locked_by = NULL,
+         locked_at = NULL
+     WHERE id = $1`,
+    [id, now, errorMessage, outcome],
+  );
+}

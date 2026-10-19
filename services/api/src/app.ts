@@ -28,6 +28,8 @@ import { StreamingUploadService } from './upload/streaming-service.js';
 import { uploadRoutes } from './routes/upload.js';
 import { scansRoutes } from './routes/scans.js';
 import { securityDecisionsRoutes } from './routes/security-decisions.js';
+import { filesRoutes } from './routes/files.js';
+import { LocalKeyProvider, type KeyProvider } from '@sug/crypto';
 import pg from 'pg';
 
 export interface AppOptions {
@@ -35,6 +37,7 @@ export interface AppOptions {
   db?: ReadinessDatabase | undefined;
   storage?: ReadinessStorage | undefined;
   storageProvider?: StorageProvider | undefined;
+  keyProvider?: KeyProvider | undefined;
   apiKeyService?: ApiKeyService | undefined;
   uploadAuthService?: UploadAuthorizationService | undefined;
   userService?: UserService | undefined;
@@ -323,6 +326,24 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   await app.register(securityDecisionsRoutes, {
     db: authDb,
     apiKeyService,
+    jwtPublicKeyPem,
+  });
+
+  // 15. Clean Object Access & File Management Routes (P20)
+  const keyProvider =
+    options.keyProvider ??
+    new LocalKeyProvider({
+      keys: {
+        'local:default': config.secrets.kek,
+      },
+      defaultKeyReference: 'local:default',
+    });
+
+  await app.register(filesRoutes, {
+    db: authDb,
+    apiKeyService,
+    storageProvider,
+    keyProvider,
     jwtPublicKeyPem,
   });
 
