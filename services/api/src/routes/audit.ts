@@ -26,6 +26,8 @@ import {
   verifyAuditChainFromDb,
   verifyCheckpointSignature,
   createAuditCheckpoint,
+  formatCheckpointKey,
+  readBodyToBuffer,
   type AuditCheckpoint,
 } from '@sug/audit';
 import type { StorageProvider } from '@sug/storage';
@@ -417,6 +419,24 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (app, op
       } | null = null;
 
       const maxVerifiedSeq = verificationResult.toSeq ? BigInt(verificationResult.toSeq) : null;
+      // Check for any recorded checkpoint creation events in the immutable audit ledger
+      let auditCpQuery = `
+        SELECT (details->>'last_seq')::bigint AS last_seq, details->>'checkpoint_id' AS checkpoint_id
+        FROM audit_events
+        WHERE action = 'audit.checkpoint_created'
+      `;
+      const auditCpParams: unknown[] = [];
+      if (maxVerifiedSeq !== null) {
+        auditCpQuery += " AND (details->>'last_seq')::bigint <= $1";
+        auditCpParams.push(maxVerifiedSeq.toString());
+      }
+      auditCpQuery += ' ORDER BY seq DESC LIMIT 1';
+
+      const auditCpRes = await db.query<{ last_seq: string | number; checkpoint_id: string }>(
+        auditCpQuery,
+        auditCpParams,
+      );
+
       let cpQuery = 'SELECT * FROM audit_checkpoints';
       const cpParams: unknown[] = [];
       if (maxVerifiedSeq !== null) {
@@ -433,6 +453,49 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (app, op
         s3_version_id: string;
         created_at: Date;
       }>(cpQuery, cpParams);
+
+      // Stale or Missing Checkpoint Detection:
+      // If an audit.checkpoint_created event exists in the verified sequence window,
+      // the checkpoint must exist in audit_checkpoints with last_seq >= maxAuditedCpSeq.
+      if (auditCpRes.rows.length > 0 && auditCpRes.rows[0]) {
+        const expectedLastSeq = BigInt(auditCpRes.rows[0].last_seq);
+        const expectedCpId = auditCpRes.rows[0].checkpoint_id;
+
+        if (cpRes.rows.length === 0 || !cpRes.rows[0]) {
+          return reply.status(200).send({
+            status: 'INVALID',
+            valid: false,
+            failedSeq: String(expectedLastSeq),
+            error: `Checkpoint rollback detected: audit event records checkpoint at seq ${expectedLastSeq}, but audit_checkpoints has no record`,
+            failureCategory: 'CHECKPOINT_STALE_OR_MISSING',
+          });
+        }
+
+        const actualLastSeq = BigInt(cpRes.rows[0].last_seq);
+        if (actualLastSeq < expectedLastSeq) {
+          return reply.status(200).send({
+            status: 'INVALID',
+            valid: false,
+            failedSeq: String(expectedLastSeq),
+            error: `Stale checkpoint detected: audit_checkpoints has last_seq ${actualLastSeq}, but audit ledger records newer checkpoint at seq ${expectedLastSeq}`,
+            failureCategory: 'CHECKPOINT_STALE_OR_MISSING',
+          });
+        }
+
+        if (
+          actualLastSeq === expectedLastSeq &&
+          expectedCpId &&
+          cpRes.rows[0].id !== expectedCpId
+        ) {
+          return reply.status(200).send({
+            status: 'INVALID',
+            valid: false,
+            failedSeq: String(expectedLastSeq),
+            error: `Checkpoint ID mismatch: audit_checkpoints record (${cpRes.rows[0].id}) does not match audit ledger (${expectedCpId})`,
+            failureCategory: 'CHECKPOINT_STALE_OR_MISSING',
+          });
+        }
+      }
 
       if (cpRes.rows.length > 0 && cpRes.rows[0]) {
         const cpRow = cpRes.rows[0];
@@ -511,6 +574,76 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (app, op
               subsequentEventsCount: 0,
             },
           });
+        }
+
+        // Verify physical S3 checkpoint object existence and identity if storageProvider is configured
+        if (storageProvider && auditBucket && cpRow.s3_version_id) {
+          const key = formatCheckpointKey(cp.lastSeq);
+          try {
+            const s3Res = await storageProvider.getByVersion({
+              bucket: auditBucket,
+              key,
+              versionId: cpRow.s3_version_id,
+            });
+            const rawBytes = await readBodyToBuffer(s3Res.body);
+            let s3Cp: AuditCheckpoint;
+            try {
+              s3Cp = JSON.parse(rawBytes.toString('utf8'));
+            } catch {
+              return reply.status(200).send({
+                status: 'INVALID',
+                valid: false,
+                failedSeq: String(cp.lastSeq),
+                error: `S3 checkpoint object at ${key} contains invalid JSON`,
+                failureCategory: 'CHECKPOINT_STORAGE_MISMATCH',
+                latestCheckpoint: {
+                  id: cp.checkpointId,
+                  lastSeq: String(cp.lastSeq),
+                  chainHash: cp.chainHash,
+                  signatureValid: true,
+                  prefixMatched: true,
+                  subsequentEventsCount: 0,
+                },
+              });
+            }
+            if (
+              s3Cp.checkpointId !== cp.checkpointId ||
+              s3Cp.chainHash.toLowerCase() !== cp.chainHash.toLowerCase() ||
+              String(s3Cp.lastSeq) !== String(cp.lastSeq)
+            ) {
+              return reply.status(200).send({
+                status: 'INVALID',
+                valid: false,
+                failedSeq: String(cp.lastSeq),
+                error: `S3 checkpoint object at ${key} version ${cpRow.s3_version_id} does not match database record`,
+                failureCategory: 'CHECKPOINT_STORAGE_MISMATCH',
+                latestCheckpoint: {
+                  id: cp.checkpointId,
+                  lastSeq: String(cp.lastSeq),
+                  chainHash: cp.chainHash,
+                  signatureValid: true,
+                  prefixMatched: true,
+                  subsequentEventsCount: 0,
+                },
+              });
+            }
+          } catch (err: unknown) {
+            return reply.status(200).send({
+              status: 'INVALID',
+              valid: false,
+              failedSeq: String(cp.lastSeq),
+              error: `Failed to retrieve checkpoint from S3 storage at ${key} version ${cpRow.s3_version_id}: ${err instanceof Error ? err.message : String(err)}`,
+              failureCategory: 'CHECKPOINT_STORAGE_MISSING',
+              latestCheckpoint: {
+                id: cp.checkpointId,
+                lastSeq: String(cp.lastSeq),
+                chainHash: cp.chainHash,
+                signatureValid: true,
+                prefixMatched: true,
+                subsequentEventsCount: 0,
+              },
+            });
+          }
         }
 
         const headSeq = verificationResult.toSeq ? BigInt(verificationResult.toSeq) : 0n;

@@ -875,6 +875,131 @@ describe('Phase P21 Adversarial Integration — Audit Chain & Checkpoints', () =
       expect(fullBody.checkpoint.subsequentEventsCount).toBeGreaterThanOrEqual(3);
     });
 
+    it('detects stale or missing checkpoint when superuser deletes checkpoint record from audit_checkpoints', async () => {
+      // 1. Create a checkpoint
+      const cpRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/audit/checkpoints',
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(cpRes.statusCode).toBe(201);
+      const cp = JSON.parse(cpRes.body).checkpoint;
+
+      // 2. Backup the checkpoint record from audit_checkpoints
+      const cpRowRes = await pool.query<{
+        id: string;
+        last_seq: string;
+        chain_hash: Buffer;
+        signature: Buffer;
+        s3_version_id: string;
+        created_at: Date;
+      }>('SELECT * FROM audit_checkpoints WHERE id = $1', [cp.checkpointId]);
+      expect(cpRowRes.rows.length).toBe(1);
+      const cpBackup = cpRowRes.rows[0]!;
+
+      // 3. Superuser tampers by bypassing trigger (session_replication_role = replica) and deleting the checkpoint
+      await pool.query("SET session_replication_role = 'replica'");
+      await pool.query('DELETE FROM audit_checkpoints WHERE id = $1', [cp.checkpointId]);
+      await pool.query("SET session_replication_role = 'origin'");
+
+      // 4. Verification must detect the missing checkpoint against the immutable audit.checkpoint_created ledger
+      const verifyRes = await app.inject({
+        method: 'GET',
+        url: '/audit/verify',
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      const verifyBody = JSON.parse(verifyRes.body);
+      expect(verifyBody.status).toBe('INVALID');
+      expect(verifyBody.valid).toBe(false);
+      expect(verifyBody.failureCategory).toBe('CHECKPOINT_STALE_OR_MISSING');
+
+      // 5. Restore the checkpoint record so subsequent tests remain healthy
+      await pool.query("SET session_replication_role = 'replica'");
+      await pool.query(
+        `INSERT INTO audit_checkpoints(id, last_seq, chain_hash, signature, s3_version_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          cpBackup.id,
+          cpBackup.last_seq,
+          cpBackup.chain_hash,
+          cpBackup.signature,
+          cpBackup.s3_version_id,
+          cpBackup.created_at,
+        ],
+      );
+      await pool.query("SET session_replication_role = 'origin'");
+
+      // Verify chain is valid again
+      const restoredRes = await app.inject({
+        method: 'GET',
+        url: '/audit/verify',
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      expect(JSON.parse(restoredRes.body).status).toBe('VALID');
+    });
+
+    it('detects tampered S3 checkpoint payload during verification (CHECKPOINT_STORAGE_MISMATCH)', async () => {
+      // 1. Create a checkpoint
+      const cpRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/audit/checkpoints',
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(cpRes.statusCode).toBe(201);
+      const cpData = JSON.parse(cpRes.body);
+      const cp = cpData.checkpoint;
+      const key = formatCheckpointKey(cp.lastSeq);
+
+      // 2. Put a tampered JSON object into S3 to generate a mismatched version
+      const tamperedCp = {
+        ...cp,
+        checkpointId: crypto.randomUUID(), // tampered ID
+      };
+      const putRes = await rawS3.send(
+        new PutObjectCommand({
+          Bucket: AUDIT_BUCKET,
+          Key: key,
+          Body: JSON.stringify(tamperedCp),
+          ContentType: 'application/json',
+        }),
+      );
+      const tamperedVersionId = putRes.VersionId;
+
+      // Point the DB checkpoint to the tampered S3 version temporarily
+      await pool.query("SET session_replication_role = 'replica'");
+      await pool.query('UPDATE audit_checkpoints SET s3_version_id = $1 WHERE id = $2', [
+        tamperedVersionId,
+        cp.checkpointId,
+      ]);
+      await pool.query("SET session_replication_role = 'origin'");
+
+      // 3. Verification must detect storage mismatch
+      const verifyRes = await app.inject({
+        method: 'GET',
+        url: '/audit/verify',
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      const verifyBody = JSON.parse(verifyRes.body);
+      expect(verifyBody.status).toBe('INVALID');
+      expect(verifyBody.valid).toBe(false);
+      expect(verifyBody.failureCategory).toBe('CHECKPOINT_STORAGE_MISMATCH');
+
+      // 4. Restore original s3_version_id in DB
+      await pool.query("SET session_replication_role = 'replica'");
+      await pool.query('UPDATE audit_checkpoints SET s3_version_id = $1 WHERE id = $2', [
+        cpData.s3VersionId,
+        cp.checkpointId,
+      ]);
+      await pool.query("SET session_replication_role = 'origin'");
+
+      const restoredRes = await app.inject({
+        method: 'GET',
+        url: '/audit/verify',
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      expect(JSON.parse(restoredRes.body).status).toBe('VALID');
+    });
+
     it('fails closed when audit chain is empty', async () => {
       // Test verifyAuditChainFromDb against empty query result
       const mockEmptyDb = {

@@ -235,18 +235,34 @@ describe('Phase P21: Audit System API Endpoints (Unit Tests)', () => {
           return Promise.resolve({ rows: mockCheckpoints });
         }
 
-        // Checkpoint insert
-        if (sql.includes('INSERT INTO audit_checkpoints')) {
+        // Checkpoint insert / create
+        if (
+          sql.includes('INSERT INTO audit_checkpoints') ||
+          sql.includes('audit_checkpoint_create')
+        ) {
           const row = {
             id: params[0] as string,
             last_seq: params[1] as string,
             chain_hash: params[2] as Buffer,
             signature: params[3] as Buffer,
             s3_version_id: params[4] as string,
-            created_at: new Date(params[5] as string),
+            created_at: new Date((params[5] as string) || Date.now()),
           };
           mockCheckpoints.push(row);
           return Promise.resolve({ rows: [row] });
+        }
+
+        // Audit checkpoint ledger query
+        if (sql.includes("action = 'audit.checkpoint_created'")) {
+          const cpEvents = mockEvents.filter((e) => e.action === 'audit.checkpoint_created');
+          if (cpEvents.length > 0) {
+            const last = cpEvents[cpEvents.length - 1]!;
+            const details = last.details as { last_seq?: string; checkpoint_id?: string };
+            return Promise.resolve({
+              rows: [{ last_seq: details?.last_seq, checkpoint_id: details?.checkpoint_id }],
+            });
+          }
+          return Promise.resolve({ rows: [] });
         }
 
         // Latest event for checkpoint

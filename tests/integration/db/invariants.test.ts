@@ -270,13 +270,19 @@ describe('PostgreSQL Schema & Security Invariants (DB-01 to DB-30)', () => {
     );
     const chkId = chkRes.rows[0].id;
 
-    await expect(
-      pool.query('UPDATE audit_checkpoints SET last_seq = 888888 WHERE id = $1', [chkId]),
-    ).rejects.toThrow(/audit_checkpoints is append-only/);
+    try {
+      await expect(
+        pool.query('UPDATE audit_checkpoints SET last_seq = 888888 WHERE id = $1', [chkId]),
+      ).rejects.toThrow(/audit_checkpoints is append-only/);
 
-    await expect(
-      pool.query('DELETE FROM audit_checkpoints WHERE id = $1', [chkId]),
-    ).rejects.toThrow(/audit_checkpoints is append-only/);
+      await expect(
+        pool.query('DELETE FROM audit_checkpoints WHERE id = $1', [chkId]),
+      ).rejects.toThrow(/audit_checkpoints is append-only/);
+    } finally {
+      await pool.query("SET session_replication_role = 'replica'");
+      await pool.query('DELETE FROM audit_checkpoints WHERE id = $1', [chkId]);
+      await pool.query("SET session_replication_role = 'origin'");
+    }
   });
 
   it('DB-29: promotion_jobs rejects duplicate decision_id', async () => {

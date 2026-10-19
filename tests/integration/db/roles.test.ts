@@ -49,6 +49,51 @@ describe('Database Roles & Least Privilege Authorization (DB-23 to DB-28, RLS)',
     ).rejects.toThrow(/permission denied for table security_decisions/);
   });
 
+  it('P21-LP: sug_api cannot directly INSERT into audit_checkpoints', async () => {
+    const fakeHash = crypto.createHash('sha256').update('fake-chain').digest();
+    const fakeSig = Buffer.alloc(64, 0xaa);
+    await expect(
+      apiPool.query(
+        `INSERT INTO audit_checkpoints (id, last_seq, chain_hash, signature, s3_version_id)
+         VALUES ($1, 999999, $2, $3, 'v1')`,
+        [crypto.randomUUID(), fakeHash, fakeSig],
+      ),
+    ).rejects.toThrow(/permission denied for table audit_checkpoints/);
+  });
+
+  it('P21-LP: audit_checkpoint_create rejects nonexistent seq and mismatched chain_hash', async () => {
+    const fakeHash = crypto.createHash('sha256').update('fake-chain').digest();
+    const fakeSig = Buffer.alloc(64, 0xaa);
+
+    // 1. Nonexistent seq rejected
+    await expect(
+      apiPool.query(`SELECT audit_checkpoint_create($1, 999999999, $2, $3, 'v1')`, [
+        crypto.randomUUID(),
+        fakeHash,
+        fakeSig,
+      ]),
+    ).rejects.toThrow(/does not exist/);
+
+    // 2. Query an existing audit event to get valid seq
+    const evRes = await apiPool.query<{ seq: string; event_hash: Buffer }>(
+      'SELECT seq, event_hash FROM audit_events ORDER BY seq DESC LIMIT 1',
+    );
+    expect(evRes.rows.length).toBeGreaterThan(0);
+    const validSeq = BigInt(evRes.rows[0]!.seq);
+
+    // 3. Mismatched chain_hash rejected
+    const corruptedHash = Buffer.from(evRes.rows[0]!.event_hash);
+    corruptedHash[0] = (corruptedHash[0] ?? 0) ^ 0xff;
+    await expect(
+      apiPool.query(`SELECT audit_checkpoint_create($1, $2, $3, $4, 'v1')`, [
+        crypto.randomUUID(),
+        validSeq,
+        corruptedHash,
+        fakeSig,
+      ]),
+    ).rejects.toThrow(/Chain hash mismatch/);
+  });
+
   it('DB-24: sug_scanner cannot write security_decisions', async () => {
     const boundSha = crypto.createHash('sha256').update('bound').digest();
     await expect(

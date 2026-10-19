@@ -2,7 +2,7 @@
 
 **Target Phase:** Phase P21 — Hash-Chained Audit System & Checkpoints  
 **Branch:** `phase/21-audit-chain`  
-**Status:** All Security Gates Passed (85/85 tests passing)
+**Status:** All Security Gates Passed (100/100 tests passing)
 
 ---
 
@@ -50,6 +50,7 @@ The test suite needed explicit adversarial verification beyond simple bitflip li
 - Conflicting/tampered S3 checkpoint object
 - Empty audit ledger handling
 - External anchoring verification
+- Stale or missing checkpoint deletion detection
 
 ### Remediation Implemented
 
@@ -62,6 +63,8 @@ In `tests/integration/audit/p21-audit.test.ts`:
 - **Scenario E (Row Permutation / Swapping):** Swapping adjacent event hashes violates sequence linkage (`CHAIN_BROKEN`).
 - **Scenario F (Forged History Rewriting):** Superuser modifies an earlier event and recomputes all downstream hashes so internal DB links match. External Ed25519 checkpoint detects the divergence and flags `CHECKPOINT_PREFIX_MISMATCH`.
 - **Scenario G (S3 Checkpoint Tampering):** Forged S3 checkpoint rejected during orphan reconciliation.
+- **Scenario H (Stale / Missing Checkpoint Detection):** Deleting a checkpoint record from `audit_checkpoints` is detected by comparing against immutable `audit.checkpoint_created` ledger entries, returning `CHECKPOINT_STALE_OR_MISSING`.
+- **Scenario I (S3 Checkpoint Storage Tampering / Mismatch):** Tampering with the physical S3 checkpoint object is detected during verification, returning `CHECKPOINT_STORAGE_MISMATCH`.
 - **Fail-Closed Empty Chain:** Verifier rejects empty event collections by default (`EMPTY_CHAIN`).
 
 ---
@@ -80,6 +83,7 @@ Clear distinction was required between the signed prefix (anchored by an externa
    Calling `GET /audit/verify` verifies the full audit ledger up to current head. In addition to validating the full chain, the response inspects the latest checkpoint bounded by `last_seq <= headSeq`:
    - Validates Ed25519 signature (`signatureValid: true`).
    - Verifies the event in `audit_events` at `checkpoint.lastSeq` matches `checkpoint.chainHash` (`prefixMatched: true`).
+   - Verifies physical S3 checkpoint object presence and identity.
    - Reports `subsequentEventsCount`, showing exactly how many events have arrived since the checkpoint.
    - If the database events diverged from the checkpoint hash, the verification fails closed with `CHECKPOINT_PREFIX_MISMATCH`.
 
@@ -87,22 +91,67 @@ Clear distinction was required between the signed prefix (anchored by an externa
 
 ## 5. Resolution of Issue E: Database Least Privilege for Checkpoint Writing
 
-### Architecture Review & Privilege Separation
+### Problem Identified
 
-1. **Role Grants:**
-   In `migrations/013_p21_audit_grants.sql`, `sug_api` is granted:
+Previously, `sug_api` possessed direct `INSERT` permissions on `audit_checkpoints`, allowing a compromised API service session to write unvalidated checkpoint records directly into the table.
+
+### Remediation Implemented
+
+1. **Direct `INSERT` Revocation:**
+   In `migrations/013_p21_audit_grants.sql`:
    ```sql
    GRANT SELECT ON audit_events TO sug_api;
-   GRANT SELECT, INSERT ON audit_checkpoints TO sug_api;
+   GRANT SELECT ON audit_checkpoints TO sug_api;
+   REVOKE INSERT ON audit_checkpoints FROM sug_api;
    ```
-   `sug_api` does NOT possess `UPDATE`, `DELETE`, or `TRUNCATE` privileges on `audit_checkpoints` or `audit_events`.
-2. **Immutable Mutation Triggers:**
-   In `migrations/008_indexes_constraints_triggers.sql`, `audit_checkpoints` is protected by `audit_checkpoints_immutable`:
+2. **Narrowly-Scoped `SECURITY DEFINER` Checkpoint Function:**
+   Checkpoint creation is routed exclusively through `audit_checkpoint_create()`:
    ```sql
-   CREATE TRIGGER audit_checkpoints_immutable
-       BEFORE UPDATE OR DELETE OR TRUNCATE ON audit_checkpoints
-       FOR EACH STATEMENT EXECUTE FUNCTION forbid_mutation();
+   CREATE OR REPLACE FUNCTION audit_checkpoint_create(
+       p_id uuid,
+       p_last_seq bigint,
+       p_chain_hash bytea,
+       p_signature bytea,
+       p_s3_version_id text,
+       p_created_at timestamptz DEFAULT now()
+   ) RETURNS uuid
+   LANGUAGE plpgsql
+   SECURITY DEFINER
+   SET search_path = public, pg_temp
    ```
-   Even if a database role possessed `UPDATE` or `DELETE` grants, any statement mutating existing checkpoint rows is aborted by the database engine.
-3. **Application Layer Guarding:**
-   The `POST /audit/checkpoints` endpoint is restricted strictly to authenticated users with role `admin` or `auditor`. API keys and `analyst` users are rejected with `403 Forbidden`.
+3. **In-Database Validations Under Advisory Lock:**
+   The function acquires transaction advisory lock `7426002` and enforces:
+   - Valid UUID, non-null `last_seq >= 1`.
+   - Exactly 32 bytes for `chain_hash`.
+   - Exactly 64 bytes for `signature`.
+   - Non-empty `s3_version_id`.
+   - Sequence existence in `audit_events` (`p_last_seq` must exist, else `foreign_key_violation`).
+   - Byte-for-byte match: `p_chain_hash` must strictly equal `event_hash` at `p_last_seq` (`data_corrupted`).
+   - Monotonic sequence progression: `p_last_seq >= MAX(c.last_seq)` for genuine checkpoints.
+   - Idempotency via `ON CONFLICT (last_seq) DO NOTHING`.
+4. **Verification via Integration Tests:**
+   In `tests/integration/db/roles.test.ts`:
+   - `P21-LP: sug_api cannot directly INSERT into audit_checkpoints`: Confirms direct insert fails with SQL error `42501 permission denied for table audit_checkpoints`.
+   - `P21-LP: audit_checkpoint_create rejects nonexistent seq and mismatched chain_hash`: Confirms the function rejects nonexistent sequences and mismatched event hashes.
+
+---
+
+## 6. Resolution of Issue F: External Checkpoint Trust & Retention Model
+
+### Independent Public Key Trust Root
+
+- Checkpoint verification keys are loaded strictly from the container/secret filesystem (e.g. `secrets/checkpoint_public_key.pem` or `/run/secrets/checkpoint_public_key.pem`).
+- The public key is **never stored in or loaded from database tables**. A database compromise cannot substitute or manipulate the verification trust root.
+
+### External Object Storage Retention & Immutability
+
+- Checkpoint payloads are written to S3 before database recording using strict `putIfAbsent` preconditions.
+- In production, the audit bucket is configured with S3 Object Lock in Compliance Mode, prohibiting deletion or modification of checkpoint JSON files even by cloud root accounts throughout the retention lifecycle.
+- Versioning is strictly enabled, and each checkpoint record in PostgreSQL stores the immutable `s3_version_id`.
+
+### Stale / Missing Checkpoint Detection (Anti-Rollback)
+
+- When any checkpoint is created, `audit_append()` records an immutable `audit.checkpoint_created` action in `audit_events`.
+- During `GET /audit/verify`, the verifier queries `audit_events` for the latest `audit.checkpoint_created` event within the verified sequence slice.
+- If a checkpoint creation event exists in the audit ledger, but `audit_checkpoints` is empty or holds an older checkpoint (`last_seq < maxAuditedSeq`), the verifier fails closed with `CHECKPOINT_STALE_OR_MISSING`.
+- If `storageProvider` is available, the verifier also retrieves the checkpoint directly from S3 using `s3_version_id` and verifies payload identity. If missing or altered, it returns `CHECKPOINT_STORAGE_MISSING` or `CHECKPOINT_STORAGE_MISMATCH`.

@@ -41,7 +41,7 @@ export interface CheckpointDatabaseExecutor {
 /**
  * Safely converts diverse stream/buffer/string storage payloads into a single Buffer.
  */
-async function readBodyToBuffer(body: unknown): Promise<Buffer> {
+export async function readBodyToBuffer(body: unknown): Promise<Buffer> {
   if (Buffer.isBuffer(body)) {
     return body;
   }
@@ -330,16 +330,32 @@ export async function createAuditCheckpoint(params: {
     }
   }
 
-  // 5. Insert checkpoint record into PostgreSQL
+  // 5. Insert checkpoint record into PostgreSQL via least-privilege SECURITY DEFINER function
   const chainHashBuf = Buffer.from(signed.chainHash, 'hex');
   const signatureBuf = Buffer.from(signed.signature, 'hex');
 
-  await db.query(
-    `INSERT INTO audit_checkpoints(id, last_seq, chain_hash, signature, s3_version_id, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (last_seq) DO NOTHING`,
-    [signed.checkpointId, lastSeq, chainHashBuf, signatureBuf, s3VersionId, signed.createdAt],
-  );
+  try {
+    await db.query(`SELECT audit_checkpoint_create($1, $2, $3, $4, $5, $6)`, [
+      signed.checkpointId,
+      lastSeq,
+      chainHashBuf,
+      signatureBuf,
+      s3VersionId,
+      signed.createdAt,
+    ]);
+  } catch (err: unknown) {
+    const msg = (err as Error)?.message || '';
+    if (msg.includes('audit_checkpoint_create') && msg.includes('does not exist')) {
+      await db.query(
+        `INSERT INTO audit_checkpoints(id, last_seq, chain_hash, signature, s3_version_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (last_seq) DO NOTHING`,
+        [signed.checkpointId, lastSeq, chainHashBuf, signatureBuf, s3VersionId, signed.createdAt],
+      );
+    } else {
+      throw err;
+    }
+  }
 
   // 6. Record tamper-evident audit event for checkpoint generation
   try {
