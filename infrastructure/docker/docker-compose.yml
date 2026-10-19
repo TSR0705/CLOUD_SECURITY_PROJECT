@@ -4,13 +4,16 @@ services:
     container_name: sug-postgres
     restart: unless-stopped
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     environment:
       POSTGRES_DB: sug
       POSTGRES_USER: sug_admin
       POSTGRES_PASSWORD: sug_dev_password
     volumes:
       - postgres_data:/var/lib/postgresql
+    networks:
+      - data
+      - scan
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U sug_admin -d sug']
       interval: 5s
@@ -23,7 +26,7 @@ services:
     container_name: sug-localstack
     restart: unless-stopped
     ports:
-      - '4566:4566'
+      - '127.0.0.1:4566:4566'
     environment:
       SERVICES: s3
       AWS_DEFAULT_REGION: us-east-1
@@ -32,6 +35,9 @@ services:
     volumes:
       - localstack_data:/var/lib/localstack
       - ./init/init-s3.sh:/etc/localstack/init/ready.d/init-s3.sh:ro
+    networks:
+      - store
+      - scan
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:4566/_localstack/health || exit 1']
       interval: 5s
@@ -44,7 +50,7 @@ services:
     container_name: sug-fake-gcs
     restart: unless-stopped
     ports:
-      - '4443:4443'
+      - '127.0.0.1:4443:4443'
     command:
       - '-scheme'
       - 'http'
@@ -63,6 +69,8 @@ services:
     volumes:
       - fake_gcs_data:/storage
       - ./init/data:/data:ro
+    networks:
+      - store
     healthcheck:
       test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:4443/storage/v1/b']
       interval: 5s
@@ -75,7 +83,7 @@ services:
     container_name: sug-clamav
     restart: unless-stopped
     ports:
-      - '${CLAMAV_PORT:-3310}:3310'
+      - '127.0.0.1:${CLAMAV_PORT:-3310}:3310'
     environment:
       CLAMD_CONF_StreamMaxLength: 55M
       CLAMD_CONF_MaxFileSize: 55M
@@ -88,18 +96,77 @@ services:
       CLAMD_CONF_AlertEncryptedArchive: 'yes'
       CLAMD_CONF_MaxThreads: '4'
       CLAMD_CONF_ConcurrentDatabaseReload: 'no'
-      CLAMAV_NO_FRESHCLAMD: 'false'
-      FRESHCLAM_CHECKS: '1'
+      CLAMAV_NO_FRESHCLAMD: 'true'
+      FRESHCLAM_CHECKS: '0'
     deploy:
       resources:
         limits:
           memory: 4096M
+    networks:
+      - scan
+      - data
     healthcheck:
       test: ['CMD-SHELL', 'clamdcheck.sh']
       interval: 10s
       timeout: 5s
       retries: 20
       start_period: 30s
+
+  scanner:
+    build:
+      context: ../../
+      dockerfile: services/scanner/Dockerfile
+    container_name: sug-scanner
+    restart: unless-stopped
+    read_only: true
+    user: '1000:1000'
+    cap_drop:
+      - ALL
+    security_opt:
+      - 'no-new-privileges:true'
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128M
+    networks:
+      - scan
+    secrets:
+      - aws_secret_access_key_scanner
+      - db_password
+    environment:
+      NODE_ENV: production
+      SERVICE_NAME: sug-scanner
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: sug_scanner
+      POSTGRES_PASSWORD: sug_scanner_dev_password
+      POSTGRES_DB: sug
+      S3_ENDPOINT: http://localstack:4566
+      AWS_ACCESS_KEY_ID_SCANNER: sug-scanner-key
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://127.0.0.1:3001/health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+networks:
+  edge:
+    name: sug-edge
+    driver: bridge
+  data:
+    name: sug-data
+    driver: bridge
+  store:
+    name: sug-store
+    driver: bridge
+  scan:
+    name: sug-scan
+    driver: bridge
+    internal: true
+  egress:
+    name: sug-egress
+    driver: bridge
 
 volumes:
   postgres_data:
@@ -120,3 +187,13 @@ secrets:
     file: ../../secrets/checkpoint_private_key.pem
   db_password:
     file: ../../secrets/db_password
+  aws_secret_access_key:
+    file: ../../secrets/aws_secret_access_key
+  aws_secret_access_key_api:
+    file: ../../secrets/aws_secret_access_key_api
+  aws_secret_access_key_scanner:
+    file: ../../secrets/aws_secret_access_key_scanner
+  aws_secret_access_key_promoter:
+    file: ../../secrets/aws_secret_access_key_promoter
+  aws_secret_access_key_replicator:
+    file: ../../secrets/aws_secret_access_key_replicator

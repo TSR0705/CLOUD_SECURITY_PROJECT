@@ -11,4 +11,16 @@ awslocal s3api put-bucket-versioning \
   --bucket sug-quarantine-local \
   --versioning-configuration Status=Enabled
 
-echo "=== S3 Initialization Complete: sug-quarantine-local (Versioning: Enabled) ==="
+# Create Clean Storage bucket
+awslocal s3 mb s3://sug-clean-local
+awslocal s3api put-bucket-versioning \
+  --bucket sug-clean-local \
+  --versioning-configuration Status=Enabled
+
+# Create Audit Storage bucket
+awslocal s3 mb s3://sug-audit-local
+awslocal s3api put-bucket-versioning \
+  --bucket sug-audit-local \
+  --versioning-configuration Status=Enabled
+
+echo "=== S3 Initialization Complete: sug-quarantine-local, sug-clean-local, sug-audit-local (Versioning: Enabled) ==="

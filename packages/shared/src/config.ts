@@ -538,15 +538,18 @@ export function loadConfig(options: ConfigOptions = {}): Config {
   }
 
   // --- Required Application Secrets ---
+  // For specialized worker services (e.g. sug-scanner), non-applicable secrets (auth keys, KEK, pepper)
+  // are NOT required, enforcing least-privilege secret scoping.
+  const isScanner = serviceName === 'sug-scanner';
 
   // 1. PEPPER
   const pepperRes = resolveSecret('pepper', ['SUG_PEPPER', 'PEPPER'], secretsDir, env);
-  const pepper = pepperRes.value;
+  const pepper = pepperRes.value ?? (isScanner ? '' : undefined);
   if (pepperRes.error) {
     issues.push({ key: 'PEPPER', reason: pepperRes.error });
-  } else if (!pepper) {
+  } else if (!pepper && !isScanner) {
     issues.push({ key: 'PEPPER', reason: 'required secret is missing' });
-  } else {
+  } else if (pepper) {
     const valRes = pepperSchema.safeParse(pepper);
     if (!valRes.success) {
       issues.push({ key: 'PEPPER', reason: valRes.error.issues[0]?.message ?? 'invalid' });
@@ -555,12 +558,12 @@ export function loadConfig(options: ConfigOptions = {}): Config {
 
   // 2. KEK
   const kekRes = resolveSecret('kek', ['SUG_KEK', 'KEK'], secretsDir, env);
-  const kek = kekRes.value;
+  const kek = kekRes.value ?? (isScanner ? '' : undefined);
   if (kekRes.error) {
     issues.push({ key: 'KEK', reason: kekRes.error });
-  } else if (!kek) {
+  } else if (!kek && !isScanner) {
     issues.push({ key: 'KEK', reason: 'required secret is missing' });
-  } else {
+  } else if (kek) {
     const valRes = kekSchema.safeParse(kek);
     if (!valRes.success) {
       issues.push({ key: 'KEK', reason: valRes.error.issues[0]?.message ?? 'invalid' });
@@ -575,12 +578,12 @@ export function loadConfig(options: ConfigOptions = {}): Config {
     env,
     ['jwt_private_key.pem'],
   );
-  const jwtPrivateKey = jwtRes.value;
+  const jwtPrivateKey = jwtRes.value ?? (isScanner ? '' : undefined);
   if (jwtRes.error) {
     issues.push({ key: 'JWT_PRIVATE_KEY', reason: jwtRes.error });
-  } else if (!jwtPrivateKey) {
+  } else if (!jwtPrivateKey && !isScanner) {
     issues.push({ key: 'JWT_PRIVATE_KEY', reason: 'required secret is missing' });
-  } else {
+  } else if (jwtPrivateKey) {
     const valRes = ed25519PrivateKeySchema.safeParse(jwtPrivateKey);
     if (!valRes.success) {
       issues.push({ key: 'JWT_PRIVATE_KEY', reason: valRes.error.issues[0]?.message ?? 'invalid' });
@@ -595,12 +598,12 @@ export function loadConfig(options: ConfigOptions = {}): Config {
     env,
     ['checkpoint_private_key.pem'],
   );
-  const checkpointPrivateKey = cpRes.value;
+  const checkpointPrivateKey = cpRes.value ?? (isScanner ? '' : undefined);
   if (cpRes.error) {
     issues.push({ key: 'CHECKPOINT_PRIVATE_KEY', reason: cpRes.error });
-  } else if (!checkpointPrivateKey) {
+  } else if (!checkpointPrivateKey && !isScanner) {
     issues.push({ key: 'CHECKPOINT_PRIVATE_KEY', reason: 'required secret is missing' });
-  } else {
+  } else if (checkpointPrivateKey) {
     const valRes = ed25519PrivateKeySchema.safeParse(checkpointPrivateKey);
     if (!valRes.success) {
       issues.push({
