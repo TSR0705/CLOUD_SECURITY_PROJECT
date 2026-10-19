@@ -64,6 +64,10 @@ export async function startScanner(options: ScannerRunnerOptions = {}): Promise<
   const clamavScanner = new ClamAvScanner({ host: clamavHost, port: clamavPort });
   const yaraScanner = new YaraScanner();
 
+  const pollIntervalMs = process.env.SCANNER_POLL_INTERVAL_MS
+    ? parseInt(process.env.SCANNER_POLL_INTERVAL_MS, 10)
+    : undefined;
+
   const worker =
     options.worker ??
     new ScannerWorker({
@@ -75,6 +79,7 @@ export async function startScanner(options: ScannerRunnerOptions = {}): Promise<
       enableYara: true,
       enableArchive: true,
       enableFormatChecks: true,
+      ...(pollIntervalMs !== undefined ? { pollIntervalMs } : {}),
       ...(process.env.YARA_RULES_PATH ? { rulesDir: process.env.YARA_RULES_PATH } : {}),
     });
 
