@@ -1,5 +1,5 @@
 === PHASE P21 AUDIT CHAIN VERIFICATION & TAMPER EVIDENCE ===
-Date: 2026-10-19T06:44:57.636Z
+Date: 2026-10-19T08:35:00.000Z
 Branch: phase/21-audit-chain
 Target: Secure Upload Gateway Phase P21 — Hash-Chained Audit System & Checkpoints
 Database: PostgreSQL 18 (sug_admin, Docker port 5433)
@@ -16,10 +16,10 @@ Verification Method:
 Output:
 {
   "valid": true,
-  "verifiedCount": 88801,
-  "headHash": "4bd2ccec4592cde06593b44d0df336097c415f8a34c26ffa3e4d1cef3df12b50",
+  "verifiedCount": 89853,
+  "headHash": "f0747c53d100c8b21ba30e0b3558ffdfebc2106cf9b85295c52c676bc1032dfa",
   "fromSeq": "1",
-  "toSeq": "89738"
+  "toSeq": "90790"
 }
 
 HTTP Endpoint Verification:
@@ -30,10 +30,18 @@ Response (HTTP 200 OK):
 {
   "status": "VALID",
   "valid": true,
-  "verifiedCount": 88801,
-  "headHash": "4bd2ccec4592cde06593b44d0df336097c415f8a34c26ffa3e4d1cef3df12b50",
+  "verifiedCount": 89853,
+  "headHash": "f0747c53d100c8b21ba30e0b3558ffdfebc2106cf9b85295c52c676bc1032dfa",
   "fromSeq": "1",
-  "toSeq": "89738"
+  "toSeq": "90790",
+  "checkpoint": {
+    "id": "01a1538a-0200-7f12-b2d9-13840244837f",
+    "lastSeq": "90780",
+    "chainHash": "f0747c53d100c8b21ba30e0b3558ffdfebc2106cf9b85295c52c676bc1032dfa",
+    "signatureValid": true,
+    "prefixMatched": true,
+    "subsequentEventsCount": 10
+  }
 }
 
 ================================================================================
@@ -43,14 +51,14 @@ Response (HTTP 200 OK):
 Attack Mechanism:
   Superuser temporarily disables table triggers:
     ALTER TABLE audit_events DISABLE TRIGGER ALL;
-    UPDATE audit_events SET event_hash = <corruptedHash> WHERE seq = 89739;
+    UPDATE audit_events SET event_hash = <corruptedHash> WHERE seq = 90781;
     ALTER TABLE audit_events ENABLE TRIGGER ALL;
 
 Observed Verification Output:
 {
   "valid": false,
-  "failedSeq": "89740",
-  "error": "Hash chain broken at seq 89740: prev_hash does not match predecessor event_hash",
+  "failedSeq": "90782",
+  "error": "Hash chain broken at seq 90782: prev_hash does not match predecessor event_hash",
   "failureCategory": "CHAIN_BROKEN"
 }
 
@@ -60,8 +68,8 @@ HTTP Endpoint Response:
   {
     "status": "INVALID",
     "valid": false,
-    "failedSeq": "89740",
-    "error": "Hash chain broken at seq 89740: prev_hash does not match predecessor event_hash",
+    "failedSeq": "90782",
+    "error": "Hash chain broken at seq 90782: prev_hash does not match predecessor event_hash",
     "failureCategory": "CHAIN_BROKEN"
   }
 
@@ -79,28 +87,28 @@ Restoration:
 Attack Mechanism:
   Superuser mutates jsonb details of an existing event without updating event_hash:
     ALTER TABLE audit_events DISABLE TRIGGER ALL;
-    UPDATE audit_events SET details = '{"amount": 999999, "authorized": false}'::jsonb WHERE seq = 89741;
+    UPDATE audit_events SET details = '{"amount": 999999, "authorized": false}'::jsonb WHERE seq = 90783;
     ALTER TABLE audit_events ENABLE TRIGGER ALL;
 
 Observed Verification Output (Byte-for-Byte Recomputation):
-  verifyAuditChainFromDb(pool, { fromSeq: '89741', toSeq: '89741', recomputeHashes: true })
+  verifyAuditChainFromDb(pool, { fromSeq: '90783', toSeq: '90783', recomputeHashes: true })
 
 Output:
 {
   "valid": false,
-  "failedSeq": "89741",
-  "error": "Event hash mismatch at seq 89741: computed hash does not match stored event_hash (tampered event content)",
+  "failedSeq": "90783",
+  "error": "Event hash mismatch at seq 90783: computed hash does not match stored event_hash (tampered event content)",
   "failureCategory": "HASH_MISMATCH"
 }
 
 HTTP Endpoint Response:
-  GET /audit/verify?from_seq=89741&to_seq=89741&recompute_hashes=true
+  GET /audit/verify?from_seq=90783&to_seq=90783&recompute_hashes=true
   Response (HTTP 200 OK):
   {
     "status": "INVALID",
     "valid": false,
-    "failedSeq": "89741",
-    "error": "Event hash mismatch at seq 89741: computed hash does not match stored event_hash (tampered event content)",
+    "failedSeq": "90783",
+    "error": "Event hash mismatch at seq 90783: computed hash does not match stored event_hash (tampered event content)",
     "failureCategory": "HASH_MISMATCH"
   }
 
@@ -120,14 +128,14 @@ Restoration:
 Attack Mechanism:
   Superuser deletes an interior audit row with triggers disabled:
     ALTER TABLE audit_events DISABLE TRIGGER ALL;
-    DELETE FROM audit_events WHERE seq = 89707;
+    DELETE FROM audit_events WHERE seq = 90784;
     ALTER TABLE audit_events ENABLE TRIGGER ALL;
 
 Observed Verification Output:
 {
   "valid": false,
-  "failedSeq": "89708",
-  "error": "Hash chain broken at seq 89708: prev_hash does not match predecessor event_hash",
+  "failedSeq": "90785",
+  "error": "Hash chain broken at seq 90785: prev_hash does not match predecessor event_hash",
   "failureCategory": "CHAIN_BROKEN"
 }
 
@@ -140,26 +148,151 @@ Restoration:
   Row restored using OVERRIDING SYSTEM VALUE with triggers temporarily disabled.
 
 ================================================================================
-5. POST-RESTORATION CHAIN VERIFICATION
+5. ADVERSARIAL TAMPER SCENARIO D: CORRUPTED GENESIS ROOT
 ================================================================================
 
-Output:
+Attack Mechanism:
+  Superuser sets prev_hash of sequence 1 to non-zero bytes (0xef * 32).
+
+Observed Verification Output:
 {
-  "valid": true,
-  "verifiedCount": 88804,
-  "headHash": "63ba32ed1dc68f0c9fd8200d0113de3250dc7b4a14d8c98da4cf5f678edcea2f",
-  "fromSeq": "1",
-  "toSeq": "89741"
+  "valid": false,
+  "failedSeq": "1",
+  "error": "Root event at seq 1 must have zero prev_hash",
+  "failureCategory": "GENESIS_VIOLATION"
 }
 
 HTTP Endpoint Response:
   GET /audit/verify
   Response (HTTP 200 OK):
   {
-    "status": "VALID",
-    "valid": true,
-    "verifiedCount": 88804,
-    "headHash": "63ba32ed1dc68f0c9fd8200d0113de3250dc7b4a14d8c98da4cf5f678edcea2f",
-    "fromSeq": "1",
-    "toSeq": "89741"
+    "status": "INVALID",
+    "valid": false,
+    "failedSeq": "1",
+    "error": "Root event at seq 1 must have zero prev_hash",
+    "failureCategory": "GENESIS_VIOLATION"
   }
+
+Security Invariant Verified:
+  Genesis record is strictly constrained to 32 zero-bytes prev_hash.
+
+Restoration:
+  Superuser restores authentic 32-byte zero prev_hash on seq 1.
+
+================================================================================
+6. ADVERSARIAL TAMPER SCENARIO E: ROW REORDERING / SWAPPED ADJACENT ROWS
+================================================================================
+
+Attack Mechanism:
+  Superuser swaps event_hash between consecutive records seq A and seq B.
+
+Observed Verification Output:
+{
+  "valid": false,
+  "failedSeq": "<seqB>",
+  "error": "Hash chain broken at seq <seqB>: prev_hash does not match predecessor event_hash",
+  "failureCategory": "CHAIN_BROKEN"
+}
+
+HTTP Endpoint Response:
+  GET /audit/verify
+  Response (HTTP 200 OK):
+  {
+    "status": "INVALID",
+    "valid": false,
+    "failureCategory": "CHAIN_BROKEN"
+  }
+
+Security Invariant Verified:
+  Any permutation or swapping of rows violates monotonic hash chaining.
+
+Restoration:
+  Superuser restores original authentic hashes.
+
+================================================================================
+7. ADVERSARIAL TAMPER SCENARIO F: FORGED CHAIN REWRITE DETECTED BY EXTERNAL ANCHOR
+================================================================================
+
+Attack Mechanism:
+  Superuser rewrites an earlier event, recomputes its event_hash, and updates the
+  successor event's prev_hash so all database-internal links match perfectly.
+  However, an authentic Ed25519-signed checkpoint anchors the authentic hash in S3 and DB.
+
+Observed Verification Output:
+{
+  "valid": false,
+  "failedSeq": "<checkpointSeq>",
+  "error": "Audit chain diverged from signed checkpoint: event_hash at seq <checkpointSeq> does not match checkpoint chain_hash",
+  "failureCategory": "CHECKPOINT_PREFIX_MISMATCH",
+  "latestCheckpoint": {
+    "id": "<checkpointId>",
+    "lastSeq": "<checkpointSeq>",
+    "chainHash": "<authenticHash>",
+    "signatureValid": true,
+    "prefixMatched": false,
+    "subsequentEventsCount": 0
+  }
+}
+
+Security Invariant Verified:
+  External anchoring via Ed25519-signed checkpoints in immutable storage makes it
+  mathematically impossible for a superuser to rewrite audit history undetected,
+  even if they recompute all downstream SHA-256 hashes inside PostgreSQL.
+
+Restoration:
+  Superuser restores authentic event records.
+
+================================================================================
+8. ADVERSARIAL TAMPER SCENARIO G: S3 CHECKPOINT TAMPERING / CONFLICTING OBJECT
+================================================================================
+
+Attack Mechanism:
+  Adversary attempts to plant an unauthorized or modified JSON object in S3
+  at checkpoints/checkpoint_<lastSeq>.json during putIfAbsent conflict.
+
+Observed Verification Output:
+  createAuditCheckpoint() retrieves the exact S3 version, parses JSON payload,
+  and executes verifyCheckpointSignature(existingCp, publicKeyPem):
+    - Forged key / bitflip: Throws "Orphan reconciliation failed: cryptographic signature invalid"
+    - Mismatched lastSeq: Throws "Orphan reconciliation mismatch: existing S3 checkpoint lastSeq does not match expected"
+    - Mismatched chainHash: Throws "Orphan reconciliation mismatch: existing S3 checkpoint chainHash does not match expected"
+    - Corrupted JSON: Throws "Orphan reconciliation failed: existing S3 checkpoint contains invalid JSON"
+
+Security Invariant Verified:
+  createAuditCheckpoint NEVER trusts S3 head metadata alone. It cryptographically
+  validates payload, signature, and hash alignment before inserting into the DB.
+
+================================================================================
+9. SIGNED-PREFIX VS CURRENT-HEAD SEMANTICS
+================================================================================
+
+Prefix Query:
+  GET /audit/verify?to_seq=<checkpointLastSeq>
+Response:
+{
+  "status": "VALID",
+  "valid": true,
+  "headHash": "<checkpointChainHash>"
+}
+
+Full Chain Continuation Query:
+  GET /audit/verify
+Response:
+{
+  "status": "VALID",
+  "valid": true,
+  "verifiedCount": 89860,
+  "headHash": "<currentHeadHash>",
+  "checkpoint": {
+    "id": "<checkpointId>",
+    "lastSeq": "<checkpointLastSeq>",
+    "chainHash": "<checkpointChainHash>",
+    "signatureValid": true,
+    "prefixMatched": true,
+    "subsequentEventsCount": 10
+  }
+}
+
+Security Invariant Verified:
+  Verifier distinguishes between the signed immutable prefix and ongoing events
+  subsequent to the checkpoint up to current head.

@@ -35,7 +35,7 @@ export interface VerificationSuccess {
 
 export interface VerificationFailure {
   valid: false;
-  failedSeq: bigint | number | string;
+  failedSeq?: bigint | number | string | undefined;
   error: string;
   failureCategory?:
     | 'CHAIN_BROKEN'
@@ -43,6 +43,10 @@ export interface VerificationFailure {
     | 'GENESIS_VIOLATION'
     | 'SEQUENCE_VIOLATION'
     | 'MALFORMED_RECORD'
+    | 'EMPTY_CHAIN'
+    | 'CHECKPOINT_PREFIX_MISMATCH'
+    | 'CHECKPOINT_SIGNATURE_INVALID'
+    | 'CHECKPOINT_EVENT_MISSING'
     | undefined;
 }
 
@@ -55,6 +59,8 @@ export interface VerifyChainOptions {
   expectedPredecessorHash?: Buffer | undefined;
   /** If true (or defaulted when occurred_at_text is present), recomputes and verifies each event_hash */
   recomputeHashes?: boolean | undefined;
+  /** If true, empty array of events returns valid: true with count 0 instead of failing closed */
+  allowEmpty?: boolean | undefined;
 }
 
 /**
@@ -129,10 +135,17 @@ export function verifyAuditChain(
   options: VerifyChainOptions = {},
 ): VerificationResult {
   if (events.length === 0) {
+    if (options.allowEmpty) {
+      return {
+        valid: true,
+        verifiedCount: 0,
+        headHash: '00'.repeat(32),
+      };
+    }
     return {
-      valid: true,
-      verifiedCount: 0,
-      headHash: '00'.repeat(32),
+      valid: false,
+      error: 'Audit chain is empty: zero events found',
+      failureCategory: 'EMPTY_CHAIN',
     };
   }
 
@@ -385,6 +398,14 @@ export async function verifyAuditChainFromDb(
     if (rows.length < batchSize) {
       break;
     }
+  }
+
+  if (totalVerified === 0) {
+    return {
+      valid: false,
+      error: 'Audit chain is empty: zero events found',
+      failureCategory: 'EMPTY_CHAIN',
+    };
   }
 
   const result: VerificationSuccess = {

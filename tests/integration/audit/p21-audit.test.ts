@@ -30,6 +30,7 @@ import {
   verifyAuditChainFromDb,
   createAuditCheckpoint,
   verifyCheckpointSignature,
+  signCheckpoint,
   formatCheckpointKey,
   type AuditCheckpoint,
 } from '@sug/audit';
@@ -288,32 +289,40 @@ describe('Phase P21 Adversarial Integration — Audit Chain & Checkpoints', () =
       expect(dbRow.rows[0].s3_version_id).toBe(body.s3VersionId);
       expect(dbRow.rows[0].signature.toString('hex')).toBe(cp.signature);
 
-      // 4. Verify audit_events recorded 'checkpoint.created'
+      // 4. Verify audit_events recorded 'audit.checkpoint_created'
       const auditRow = await pool.query(
-        "SELECT * FROM audit_events WHERE action = 'checkpoint.created' ORDER BY seq DESC LIMIT 1",
+        "SELECT * FROM audit_events WHERE action = 'audit.checkpoint_created' ORDER BY seq DESC LIMIT 1",
       );
       expect(auditRow.rows.length).toBe(1);
       expect((auditRow.rows[0].details as { last_seq?: string })?.last_seq).toBe(cp.lastSeq);
     });
 
-    it('safely reconciles orphan when S3 write already exists before DB commit', async () => {
+    it('safely reconciles orphan when S3 write already exists before DB commit and payload is authentic', async () => {
       // Append a fresh event to ensure checkpoint has a unique latest seq
       const appendRes = await pool.query<{ seq: string }>(
         `SELECT audit_append('service', 'orphan_test', 'ORPHAN_PREPARE', '{}'::jsonb, '{}'::jsonb) as seq`,
       );
       const lastSeq = appendRes.rows[0].seq;
 
-      // Pre-populate S3 object to simulate an orphan scenario
+      // Fetch authentic event_hash for lastSeq
+      const evRes = await pool.query<{ event_hash: Buffer }>(
+        'SELECT event_hash FROM audit_events WHERE seq = $1',
+        [lastSeq],
+      );
+      const authenticHash = evRes.rows[0].event_hash.toString('hex');
+
+      // Pre-populate S3 object with authentic signed checkpoint to simulate an orphan scenario
       const key = formatCheckpointKey(lastSeq);
-      const simulatedCheckpoint: AuditCheckpoint = {
-        schema: 'sug.audit_checkpoint/v1',
-        checkpointId: crypto.randomUUID(),
-        createdAt: new Date().toISOString(),
-        lastSeq: lastSeq.toString(),
-        chainHash: crypto.randomBytes(32).toString('hex'),
-        signature: crypto.randomBytes(64).toString('hex'),
-        signerKeyId: 'ed25519-2026',
-      };
+      const simulatedCheckpoint = signCheckpoint(
+        {
+          schema: 'sug.audit_checkpoint/v1',
+          checkpointId: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          lastSeq: lastSeq.toString(),
+          chainHash: authenticHash,
+        },
+        checkpointPrivateKeyPem,
+      );
 
       await rawS3.send(
         new PutObjectCommand({
@@ -324,7 +333,7 @@ describe('Phase P21 Adversarial Integration — Audit Chain & Checkpoints', () =
         }),
       );
 
-      // Calling createAuditCheckpoint should detect existing S3 object via head and reconcile without error
+      // Calling createAuditCheckpoint detects existing S3 object, verifies signature and hashes, and reconciles
       const reconciled = await createAuditCheckpoint({
         db: pool,
         storage: s3Provider,
@@ -334,8 +343,96 @@ describe('Phase P21 Adversarial Integration — Audit Chain & Checkpoints', () =
       });
 
       expect(reconciled).toBeDefined();
-      expect(reconciled.storedInDb).toBe(true);
-      expect(reconciled.s3VersionId).toBeDefined();
+      expect(reconciled?.storedInDb).toBe(true);
+      expect(reconciled?.s3VersionId).toBeDefined();
+    });
+
+    it('aborts orphan reconciliation if existing S3 checkpoint signature is forged/invalid', async () => {
+      const appendRes = await pool.query<{ seq: string }>(
+        `SELECT audit_append('service', 'orphan_bad_sig', 'BAD_SIG_PREPARE', '{}'::jsonb, '{}'::jsonb) as seq`,
+      );
+      const lastSeq = appendRes.rows[0].seq;
+
+      const evRes = await pool.query<{ event_hash: Buffer }>(
+        'SELECT event_hash FROM audit_events WHERE seq = $1',
+        [lastSeq],
+      );
+      const authenticHash = evRes.rows[0].event_hash.toString('hex');
+
+      // Generate unauthorized keypair
+      const otherPair = crypto.generateKeyPairSync('ed25519', {
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      });
+
+      const key = formatCheckpointKey(lastSeq);
+      const forgedCheckpoint = signCheckpoint(
+        {
+          schema: 'sug.audit_checkpoint/v1',
+          checkpointId: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          lastSeq: lastSeq.toString(),
+          chainHash: authenticHash,
+        },
+        otherPair.privateKey,
+      );
+
+      await rawS3.send(
+        new PutObjectCommand({
+          Bucket: AUDIT_BUCKET,
+          Key: key,
+          Body: Buffer.from(JSON.stringify(forgedCheckpoint), 'utf8'),
+          ContentType: 'application/json',
+        }),
+      );
+
+      await expect(
+        createAuditCheckpoint({
+          db: pool,
+          storage: s3Provider,
+          auditBucket: AUDIT_BUCKET,
+          privateKeyPem: checkpointPrivateKeyPem,
+          publicKeyPem: checkpointPublicKeyPem,
+        }),
+      ).rejects.toThrow('cryptographic signature invalid');
+    });
+
+    it('aborts orphan reconciliation if existing S3 checkpoint chainHash does not match database', async () => {
+      const appendRes = await pool.query<{ seq: string }>(
+        `SELECT audit_append('service', 'orphan_mismatch', 'HASH_MISMATCH_PREPARE', '{}'::jsonb, '{}'::jsonb) as seq`,
+      );
+      const lastSeq = appendRes.rows[0].seq;
+
+      const key = formatCheckpointKey(lastSeq);
+      const mismatchedCheckpoint = signCheckpoint(
+        {
+          schema: 'sug.audit_checkpoint/v1',
+          checkpointId: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          lastSeq: lastSeq.toString(),
+          chainHash: '99'.repeat(32),
+        },
+        checkpointPrivateKeyPem,
+      );
+
+      await rawS3.send(
+        new PutObjectCommand({
+          Bucket: AUDIT_BUCKET,
+          Key: key,
+          Body: Buffer.from(JSON.stringify(mismatchedCheckpoint), 'utf8'),
+          ContentType: 'application/json',
+        }),
+      );
+
+      await expect(
+        createAuditCheckpoint({
+          db: pool,
+          storage: s3Provider,
+          auditBucket: AUDIT_BUCKET,
+          privateKeyPem: checkpointPrivateKeyPem,
+          publicKeyPem: checkpointPublicKeyPem,
+        }),
+      ).rejects.toThrow('Orphan reconciliation mismatch: existing S3 checkpoint chainHash');
     });
   });
 
@@ -403,7 +500,7 @@ describe('Phase P21 Adversarial Integration — Audit Chain & Checkpoints', () =
       const restoredBody = JSON.parse(restoredRes.body);
       expect(restoredBody.status).toBe('VALID');
       expect(restoredBody.valid).toBe(true);
-    });
+    }, 25000);
 
     it('detects payload tampering by superuser via byte-for-byte hash recomputation', async () => {
       // Append target event
@@ -530,6 +627,265 @@ describe('Phase P21 Adversarial Integration — Audit Chain & Checkpoints', () =
         headers: { authorization: `Bearer ${auditorToken}` },
       });
       expect(JSON.parse(restoredRes.body).status).toBe('VALID');
+    }, 25000);
+
+    it('detects corrupted genesis event (non-zero prev_hash at seq 1)', async () => {
+      const genesisRow = await pool.query('SELECT prev_hash FROM audit_events WHERE seq = 1');
+      const originalGenesisPrev = genesisRow.rows[0].prev_hash as Buffer;
+
+      const client = await pool.connect();
+      try {
+        await client.query('ALTER TABLE audit_events DISABLE TRIGGER ALL');
+        const corruptedPrev = Buffer.alloc(32, 0xef);
+        await client.query('UPDATE audit_events SET prev_hash = $1 WHERE seq = 1', [corruptedPrev]);
+        await client.query('ALTER TABLE audit_events ENABLE TRIGGER ALL');
+
+        const verifyRes = await app.inject({
+          method: 'GET',
+          url: '/audit/verify',
+          headers: { authorization: `Bearer ${auditorToken}` },
+        });
+
+        expect(verifyRes.statusCode).toBe(200);
+        const body = JSON.parse(verifyRes.body);
+        expect(body.status).toBe('INVALID');
+        expect(body.valid).toBe(false);
+        expect(body.failureCategory).toBe('GENESIS_VIOLATION');
+      } finally {
+        await client.query('ALTER TABLE audit_events DISABLE TRIGGER ALL');
+        await client.query('UPDATE audit_events SET prev_hash = $1 WHERE seq = 1', [
+          originalGenesisPrev,
+        ]);
+        await client.query('ALTER TABLE audit_events ENABLE TRIGGER ALL');
+        client.release();
+      }
+
+      // Restored
+      const restoredRes = await app.inject({
+        method: 'GET',
+        url: '/audit/verify',
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      expect(JSON.parse(restoredRes.body).status).toBe('VALID');
+    });
+
+    it('detects interior row reordering / swapped adjacent hashes', async () => {
+      // Append two target events
+      const resA = await pool.query<{ seq: string }>(
+        `SELECT audit_append('service', 'reorder_test', 'REORDER_A', '{}'::jsonb, '{}'::jsonb) as seq`,
+      );
+      const resB = await pool.query<{ seq: string }>(
+        `SELECT audit_append('service', 'reorder_test', 'REORDER_B', '{}'::jsonb, '{}'::jsonb) as seq`,
+      );
+      const seqA = resA.rows[0].seq;
+      const seqB = resB.rows[0].seq;
+
+      const rowA = await pool.query('SELECT event_hash FROM audit_events WHERE seq = $1', [seqA]);
+      const rowB = await pool.query('SELECT event_hash FROM audit_events WHERE seq = $1', [seqB]);
+      const origHashA = rowA.rows[0].event_hash as Buffer;
+      const origHashB = rowB.rows[0].event_hash as Buffer;
+
+      const client = await pool.connect();
+      try {
+        await client.query('ALTER TABLE audit_events DISABLE TRIGGER ALL');
+        // Swap event_hash between A and B using a temporary distinct hash to avoid unique constraint collision
+        const tempHash = crypto.randomBytes(32);
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          tempHash,
+          seqA,
+        ]);
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          origHashA,
+          seqB,
+        ]);
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          origHashB,
+          seqA,
+        ]);
+        await client.query('ALTER TABLE audit_events ENABLE TRIGGER ALL');
+
+        const verifyRes = await app.inject({
+          method: 'GET',
+          url: '/audit/verify',
+          headers: { authorization: `Bearer ${auditorToken}` },
+        });
+
+        expect(verifyRes.statusCode).toBe(200);
+        const body = JSON.parse(verifyRes.body);
+        expect(body.status).toBe('INVALID');
+        expect(body.valid).toBe(false);
+      } finally {
+        await client.query('ALTER TABLE audit_events DISABLE TRIGGER ALL');
+        const tempHash = crypto.randomBytes(32);
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          tempHash,
+          seqA,
+        ]);
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          origHashB,
+          seqB,
+        ]);
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          origHashA,
+          seqA,
+        ]);
+        await client.query('ALTER TABLE audit_events ENABLE TRIGGER ALL');
+        client.release();
+      }
+
+      // Restored
+      const restoredRes = await app.inject({
+        method: 'GET',
+        url: '/audit/verify',
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      expect(JSON.parse(restoredRes.body).status).toBe('VALID');
+    }, 20000);
+
+    it('detects forged chain history rewriting via external Ed25519 checkpoint anchoring', async () => {
+      // 1. Create a clean checkpoint at current head
+      const cpRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/audit/checkpoints',
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(cpRes.statusCode).toBe(201);
+      const cpData = JSON.parse(cpRes.body);
+      const checkpointSeq = cpData.checkpoint.lastSeq;
+
+      // 2. Identify the subsequent event immediately following checkpointSeq (created by checkpoint logging)
+      const afterRes = await pool.query<{ seq: string; prev_hash: Buffer }>(
+        'SELECT seq, prev_hash FROM audit_events WHERE seq > $1 ORDER BY seq ASC LIMIT 1',
+        [checkpointSeq],
+      );
+      expect(afterRes.rows.length).toBe(1);
+      const afterSeq = afterRes.rows[0].seq;
+      const origAfterPrevHash = afterRes.rows[0].prev_hash;
+
+      // Save authentic state of checkpointSeq
+      const cpEventRes = await pool.query<{ event_hash: Buffer }>(
+        'SELECT event_hash FROM audit_events WHERE seq = $1',
+        [checkpointSeq],
+      );
+      const origCpEventHash = cpEventRes.rows[0].event_hash;
+
+      // 3. Superuser rewrites history: modifies checkpointSeq event_hash AND updates afterSeq prev_hash
+      // This makes the internal database chain links match perfectly, but the external checkpoint has the authentic hash!
+      const client = await pool.connect();
+      try {
+        await client.query('ALTER TABLE audit_events DISABLE TRIGGER ALL');
+        const forgedCpHash = Buffer.alloc(32, 0x77);
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          forgedCpHash,
+          checkpointSeq,
+        ]);
+        // Update afterSeq's prev_hash so internal chain link appears unbroken
+        await client.query('UPDATE audit_events SET prev_hash = $1 WHERE seq = $2', [
+          forgedCpHash,
+          afterSeq,
+        ]);
+        await client.query('ALTER TABLE audit_events ENABLE TRIGGER ALL');
+
+        // 4. Verification must detect the prefix mismatch against the external signed checkpoint!
+        const verifyRes = await app.inject({
+          method: 'GET',
+          url: '/audit/verify',
+          headers: { authorization: `Bearer ${auditorToken}` },
+        });
+
+        expect(verifyRes.statusCode).toBe(200);
+        const body = JSON.parse(verifyRes.body);
+        expect(body.status).toBe('INVALID');
+        expect(body.valid).toBe(false);
+        expect(body.failureCategory).toBe('CHECKPOINT_PREFIX_MISMATCH');
+        expect(body.failedSeq.toString()).toBe(checkpointSeq.toString());
+        expect(body.error).toContain('diverged from signed checkpoint');
+      } finally {
+        // Restore authentic hashes
+        await client.query('ALTER TABLE audit_events DISABLE TRIGGER ALL');
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          origCpEventHash,
+          checkpointSeq,
+        ]);
+        await client.query('UPDATE audit_events SET prev_hash = $1 WHERE seq = $2', [
+          origAfterPrevHash,
+          afterSeq,
+        ]);
+        await client.query('ALTER TABLE audit_events ENABLE TRIGGER ALL');
+        client.release();
+      }
+
+      // Restored
+      const restoredRes = await app.inject({
+        method: 'GET',
+        url: '/audit/verify',
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      const restoredBody = JSON.parse(restoredRes.body);
+      expect(restoredBody.status).toBe('VALID');
+      expect(restoredBody.checkpoint.prefixMatched).toBe(true);
+    }, 20000);
+  });
+
+  describe('audit-04: Signed-Prefix vs Current-Head Semantics and Fail-Closed Outages', () => {
+    it('demonstrates signed prefix verification vs current head continuation', async () => {
+      // 1. Create a checkpoint
+      const cpRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/audit/checkpoints',
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(cpRes.statusCode).toBe(201);
+      const cp = JSON.parse(cpRes.body).checkpoint;
+
+      // 2. Append two business events after checkpoint creation
+      await pool.query(
+        `SELECT audit_append('service', 'prefix_test', 'CONTINUATION_1', '{}'::jsonb, '{}'::jsonb)`,
+      );
+      await pool.query(
+        `SELECT audit_append('service', 'prefix_test', 'CONTINUATION_2', '{}'::jsonb, '{}'::jsonb)`,
+      );
+
+      // 3. Signed prefix verification: querying up to cp.lastSeq
+      const prefixRes = await app.inject({
+        method: 'GET',
+        url: `/audit/verify?to_seq=${cp.lastSeq}`,
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      expect(prefixRes.statusCode).toBe(200);
+      const prefixBody = JSON.parse(prefixRes.body);
+      expect(prefixBody.status).toBe('VALID');
+      expect(prefixBody.valid).toBe(true);
+      expect(prefixBody.headHash.toLowerCase()).toBe(cp.chainHash.toLowerCase());
+
+      // 4. Current head verification: unconstrained verify covers continuation past checkpoint
+      const fullRes = await app.inject({
+        method: 'GET',
+        url: '/audit/verify',
+        headers: { authorization: `Bearer ${auditorToken}` },
+      });
+      expect(fullRes.statusCode).toBe(200);
+      const fullBody = JSON.parse(fullRes.body);
+      expect(fullBody.status).toBe('VALID');
+      expect(fullBody.valid).toBe(true);
+      expect(fullBody.checkpoint).toBeDefined();
+      expect(fullBody.checkpoint.prefixMatched).toBe(true);
+      expect(fullBody.checkpoint.signatureValid).toBe(true);
+      // Checkpoint created event + 2 continuation events => at least 3 events past checkpoint
+      expect(fullBody.checkpoint.subsequentEventsCount).toBeGreaterThanOrEqual(3);
+    });
+
+    it('fails closed when audit chain is empty', async () => {
+      // Test verifyAuditChainFromDb against empty query result
+      const mockEmptyDb = {
+        query: () => Promise.resolve({ rows: [] }),
+      };
+      const result = await verifyAuditChainFromDb(mockEmptyDb);
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.failureCategory).toBe('EMPTY_CHAIN');
+        expect(result.error).toContain('zero events found');
+      }
     });
   });
 

@@ -59,12 +59,18 @@ describe('packages/audit - verifyAuditChain (Unit)', () => {
     };
   }
 
-  it('verifies empty chain as valid with zero count', () => {
-    const res = verifyAuditChain([]);
-    expect(res.valid).toBe(true);
-    if (res.valid) {
-      expect(res.verifiedCount).toBe(0);
-      expect(res.headHash).toBe('00'.repeat(32));
+  it('fails closed on empty chain by default, but permits empty if allowEmpty is set', () => {
+    const resDefault = verifyAuditChain([]);
+    expect(resDefault.valid).toBe(false);
+    if (!resDefault.valid) {
+      expect(resDefault.failureCategory).toBe('EMPTY_CHAIN');
+    }
+
+    const resAllowed = verifyAuditChain([], { allowEmpty: true });
+    expect(resAllowed.valid).toBe(true);
+    if (resAllowed.valid) {
+      expect(resAllowed.verifiedCount).toBe(0);
+      expect(resAllowed.headHash).toBe('00'.repeat(32));
     }
   });
 

@@ -4,10 +4,11 @@ Branch: phase/21-audit-chain
 Target: Secure Upload Gateway Phase P21 — Hash-Chained Audit System & Checkpoints
 
 Test Suites Summary:
-4 test files, 53 tests passed (0 failed, 0 skipped, 100% passing)
+6 test suites, 85 tests passed (0 failed, 0 skipped, 100% passing)
 
 1. tests/unit/audit/verify.test.ts (13 tests)
    - verifyAuditChain (Unit):
+     * fails closed on empty chain by default, but permits empty if allowEmpty is set
      * validates an unbroken chain slice from genesis (seq 1, zero prev_hash)
      * validates unbroken non-root slice when expectedPredecessorHash matches
      * rejects non-root slice when expectedPredecessorHash does not match
@@ -18,11 +19,10 @@ Test Suites Summary:
      * rejects duplicate sequence numbers
      * detects event content tampering when recomputeHashes is enabled (HASH_MISMATCH)
      * rejects records with malformed 32-byte hashes
-     * computes byte-for-byte SHA-256 hash matching PostgreSQL audit_append
      * canonical refs serialization strips nulls and matches PostgreSQL json_strip_nulls
      * canonical details serialization preserves jsonb stringification
 
-2. tests/unit/audit/checkpoint.test.ts (13 tests)
+2. tests/unit/audit/checkpoint.test.ts (16 tests)
    - createAuditCheckpoint & Ed25519 Signatures (Unit):
      * signs checkpoint payload deterministically with Ed25519 private key
      * verifies valid Ed25519 checkpoint signature with public key
@@ -31,12 +31,15 @@ Test Suites Summary:
      * formats standard S3 checkpoint key with zero-padding
      * creates signed checkpoint and persists to storage and DB
      * returns null when audit_events table is empty
-     * handles storage AlreadyExists idempotently and reconciles without throwing
-     * propagates non-idempotent storage put failures fail-closed
-     * records checkpoint.created audit event
-     * rejects signing when private key is invalid
-     * handles database insert error without false success reporting
-     * verifies full roundtrip: create, serialize, store, retrieve, verify signature
+     * returns existing checkpoint if already recorded in PostgreSQL and verified against S3 (idempotent)
+     * creates new checkpoint, writes to S3 first, then DB, and audits audit.checkpoint_created
+     * aborts without creating DB record if S3 write fails
+     * safely reconciles orphan when S3 returns AlreadyExists and S3 payload is authentic
+     * rejects orphan reconciliation if existing S3 checkpoint signature is INVALID
+     * rejects orphan reconciliation if existing S3 checkpoint chainHash does not match database
+     * rejects orphan reconciliation if existing S3 checkpoint body is corrupted JSON
+     * rejects checkpoint signed with unauthorized private key
+     * rejects corrupted signature bytes
 
 3. tests/unit/api/audit.test.ts (17 tests)
    - Phase P21: Audit System API Endpoints (Unit Tests):
@@ -61,28 +64,48 @@ Test Suites Summary:
        - rejects Analyst role with 403
        - allows Admin to create Ed25519-signed checkpoint with storage-first S3 persistence
 
-4. tests/integration/audit/p21-audit.test.ts (10 tests)
+4. tests/integration/audit/p21-audit.test.ts (17 tests)
    - Real PostgreSQL 18 (sug_admin, port 5433) + LocalStack S3 (sug-audit-local):
      * audit-01: End-to-End Chain Verification:
        - verifies unbroken audit chain directly via database stream and API (GET /audit/verify and /api/v1/audit/verify)
        - enforces RBAC on verification: rejects unauthenticated (401), API key (403), analyst (403)
      * audit-02: Checkpoint Creation & Storage-First Persistence:
        - creates Ed25519-signed checkpoint, persists to S3, records in DB, and audits creation
-       - safely reconciles orphan when S3 write already exists before DB commit
+       - safely reconciles orphan when S3 write already exists before DB commit and payload is authentic
+       - aborts orphan reconciliation if existing S3 checkpoint signature is forged/invalid
+       - aborts orphan reconciliation if existing S3 checkpoint chainHash does not match database
      * audit-03: Superuser Tamper Detection:
        - detects event_hash corruption by superuser at exact sequence number (failedSeq, CHAIN_BROKEN)
        - detects payload tampering by superuser via byte-for-byte hash recomputation (failedSeq, HASH_MISMATCH)
        - detects deletion of interior audit event by superuser (failedSeq, CHAIN_BROKEN)
+       - detects corrupted genesis event (non-zero prev_hash at seq 1) (failedSeq, GENESIS_VIOLATION)
+       - detects interior row reordering / swapped adjacent hashes (CHAIN_BROKEN)
+       - detects forged chain history rewriting via external Ed25519 checkpoint anchoring (failedSeq, CHECKPOINT_PREFIX_MISMATCH)
+     * audit-04: Signed-Prefix vs Current-Head Semantics and Fail-Closed Outages:
+       - demonstrates signed prefix verification vs current head continuation
+       - fails closed when audit chain is empty
      * decision.reviewed Regression Test:
        - successfully appends decision.reviewed audit event with live PostgreSQL database without argument order error
      * Tenant Isolation & Query Filtering (/security-events):
        - restricts API key strictly to its own application_id and rejects cross-tenant query with 403
        - allows Auditor to query security events across all tenants
 
+5. tests/integration/db/audit.test.ts (7 tests)
+   - PostgreSQL schema, trigger, advisory lock, and concurrency tests:
+     * DB-10: 1,000 concurrent audit_append calls produce an unbroken chain
+     * Clean restoration of event_hash in superuser tamper test
+
+6. tests/integration/db/invariants.test.ts (15 tests)
+   - DB-01 to DB-30 database schema invariants:
+     * audit_events and audit_checkpoints forbid_mutation triggers verified
+     * migrations apply cleanly and reproducibly up to 013_p21_audit_grants.sql
+
 Invariants Verified:
-  1. audit-01: Cryptographic hash chain linkage across 88,000+ real records verified unbroken.
-  2. audit-02: Ed25519 checkpoint created with storage-first S3 putIfAbsent, orphan-safe reconciliation, and DB persistence.
-  3. audit-03: Superuser tamper detection detects event_hash corruption, payload mutation, and record deletion at exact seq.
-  4. decision.reviewed: Parameter ordering fixed (actor_type, actor_id, action, refs, details) and validated on live PostgreSQL.
-  5. Tenant isolation: API keys cannot access or query audit logs of other tenants (403 Forbidden).
-  6. Immutability: audit_events and audit_checkpoints remain strictly append-only (mutation triggers enforced).
+  1. audit-01: Cryptographic hash chain linkage across 89,000+ real records verified unbroken.
+  2. audit-02: Ed25519 checkpoint created with storage-first S3 putIfAbsent, orphan-safe cryptographic verification, and DB persistence.
+  3. audit-03: Superuser tamper detection detects event_hash corruption, payload mutation, row deletion, genesis corruption, row swapping, and forged rewriting.
+  4. audit-04: Verifier cleanly distinguishes between signed prefix (bound to checkpoint) and ongoing head continuation.
+  5. decision.reviewed: Parameter ordering fixed (actor_type, actor_id, action, refs, details) and validated on live PostgreSQL.
+  6. Action taxonomy: Canonical 'audit.checkpoint_created' audit action wired and verified.
+  7. Tenant isolation: API keys cannot access or query audit logs of other tenants (403 Forbidden).
+  8. Least privilege & immutability: sug_api has only SELECT, INSERT on audit_checkpoints; forbid_mutation triggers block UPDATE, DELETE, and TRUNCATE.

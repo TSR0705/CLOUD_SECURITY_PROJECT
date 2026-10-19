@@ -25,11 +25,55 @@ export interface CheckpointStorageAdapter {
   head(params: {
     bucket: string;
     key: string;
+    versionId?: string | undefined;
   }): Promise<{ versionId?: string | undefined; contentLength: number }>;
+  getByVersion(params: {
+    bucket: string;
+    key: string;
+    versionId: string;
+  }): Promise<{ body: unknown; versionId?: string | undefined }>;
 }
 
 export interface CheckpointDatabaseExecutor {
   query<T = unknown>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+}
+
+/**
+ * Safely converts diverse stream/buffer/string storage payloads into a single Buffer.
+ */
+async function readBodyToBuffer(body: unknown): Promise<Buffer> {
+  if (Buffer.isBuffer(body)) {
+    return body;
+  }
+  if (typeof body === 'string') {
+    return Buffer.from(body, 'utf8');
+  }
+  if (body && typeof (body as { transformToString?: unknown }).transformToString === 'function') {
+    const str = await (body as { transformToString: () => Promise<string> }).transformToString();
+    return Buffer.from(str, 'utf8');
+  }
+  if (
+    body &&
+    typeof (body as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === 'function'
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of body as AsyncIterable<Uint8Array | Buffer | string>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+  if (body && typeof (body as { on?: unknown }).on === 'function') {
+    return new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const stream = body as NodeJS.ReadableStream;
+      stream.on('data', (c: unknown) => {
+        chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c as string | Uint8Array));
+      });
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+    });
+  }
+  throw new Error('Unsupported storage body format');
 }
 
 /**
@@ -101,10 +145,10 @@ export interface CheckpointCreationResult {
  * Follows strict storage-first persistence with safe orphan reconciliation:
  * 1. Claims latest audit event from PostgreSQL.
  * 2. Writes signed checkpoint JSON to S3 via putIfAbsent.
- * 3. If S3 already has this key, reconciles and re-verifies.
+ * 3. If S3 already has this key, reconciles and cryptographically verifies S3 payload.
  * 4. Inserts checkpoint record into PostgreSQL audit_checkpoints.
- * 5. Audits checkpoint.created event.
- * If S3 fails, the operation aborts and zero database records are written.
+ * 5. Audits audit.checkpoint_created event.
+ * If S3 fails or existing S3 content fails signature/identity checks, the operation aborts fail-closed.
  */
 export async function createAuditCheckpoint(params: {
   db: CheckpointDatabaseExecutor;
@@ -140,16 +184,49 @@ export async function createAuditCheckpoint(params: {
 
   if (existingDbRes.rows.length > 0 && existingDbRes.rows[0]) {
     const row = existingDbRes.rows[0];
-    const existingCheckpoint: AuditCheckpoint = {
-      schema: 'sug.audit_checkpoint/v1',
-      checkpointId: row.id,
-      lastSeq: row.last_seq,
-      chainHash: row.chain_hash.toString('hex'),
-      createdAt: row.created_at.toISOString(),
-      signature: row.signature.toString('hex'),
-    };
+    const key = formatCheckpointKey(lastSeq);
+
+    // Cryptographically verify existing S3 object matches DB record
+    const getRes = await storage.getByVersion({
+      bucket: auditBucket,
+      key,
+      versionId: row.s3_version_id,
+    });
+    const rawBytes = await readBodyToBuffer(getRes.body);
+    let s3Cp: AuditCheckpoint;
+    try {
+      s3Cp = JSON.parse(rawBytes.toString('utf8'));
+    } catch {
+      throw new Error(
+        `Integrity error: existing S3 checkpoint for seq ${lastSeq} contains invalid JSON`,
+      );
+    }
+    if (s3Cp.schema !== 'sug.audit_checkpoint/v1') {
+      throw new Error(`Integrity error: S3 checkpoint schema invalid for seq ${lastSeq}`);
+    }
+    if (!verifyCheckpointSignature(s3Cp, publicKeyPem)) {
+      throw new Error(
+        `Integrity error: existing S3 checkpoint signature invalid for seq ${lastSeq}`,
+      );
+    }
+    if (s3Cp.checkpointId !== row.id) {
+      throw new Error(
+        `Integrity error: S3 checkpoint ID (${s3Cp.checkpointId}) does not match DB record (${row.id})`,
+      );
+    }
+    if (s3Cp.chainHash.toLowerCase() !== row.chain_hash.toString('hex').toLowerCase()) {
+      throw new Error(
+        `Integrity error: S3 checkpoint chainHash does not match DB record for seq ${lastSeq}`,
+      );
+    }
+    if (String(s3Cp.lastSeq) !== String(lastSeq)) {
+      throw new Error(
+        `Integrity error: S3 checkpoint lastSeq (${s3Cp.lastSeq}) does not match expected (${lastSeq})`,
+      );
+    }
+
     return {
-      checkpoint: existingCheckpoint,
+      checkpoint: s3Cp,
       s3VersionId: row.s3_version_id,
       storedInDb: true,
       reconciled: true,
@@ -166,7 +243,7 @@ export async function createAuditCheckpoint(params: {
     chainHash: chainHashHex,
     createdAt,
   };
-  const signed = signCheckpoint(unsigned, privateKeyPem);
+  let signed = signCheckpoint(unsigned, privateKeyPem);
 
   // Self-verify signature with trusted public key before storage
   if (!verifyCheckpointSignature(signed, publicKeyPem)) {
@@ -190,10 +267,62 @@ export async function createAuditCheckpoint(params: {
   } catch (err: unknown) {
     const errorName = (err as { name?: string }).name;
     const errorMessage = (err as Error).message;
-    if (errorName === 'AlreadyExists' || errorMessage?.includes('AlreadyExists')) {
-      // Safe orphan reconciliation: check existing S3 object
+    if (
+      errorName === 'AlreadyExists' ||
+      errorMessage?.includes('AlreadyExists') ||
+      errorMessage?.includes('PreconditionFailed')
+    ) {
+      // Safe orphan reconciliation: retrieve exact S3 version and cryptographically verify
       const head = await storage.head({ bucket: auditBucket, key });
-      s3VersionId = head.versionId ?? 'latest';
+      const existingVersionId = head.versionId;
+      if (!existingVersionId) {
+        throw new Error(
+          `Orphan reconciliation failed: missing versionId for existing S3 checkpoint at ${key}`,
+        );
+      }
+
+      const getRes = await storage.getByVersion({
+        bucket: auditBucket,
+        key,
+        versionId: existingVersionId,
+      });
+      const rawBytes = await readBodyToBuffer(getRes.body);
+
+      let existingCp: AuditCheckpoint;
+      try {
+        existingCp = JSON.parse(rawBytes.toString('utf8'));
+      } catch {
+        throw new Error(
+          `Orphan reconciliation failed: existing S3 checkpoint at ${key} contains invalid JSON`,
+        );
+      }
+
+      if (existingCp.schema !== 'sug.audit_checkpoint/v1') {
+        throw new Error(
+          `Orphan reconciliation failed: invalid schema ${existingCp.schema} at ${key}`,
+        );
+      }
+
+      if (!verifyCheckpointSignature(existingCp, publicKeyPem)) {
+        throw new Error(
+          `Orphan reconciliation failed: cryptographic signature invalid on existing S3 checkpoint at ${key}`,
+        );
+      }
+
+      if (String(existingCp.lastSeq) !== String(lastSeq)) {
+        throw new Error(
+          `Orphan reconciliation mismatch: existing S3 checkpoint lastSeq ${existingCp.lastSeq} does not match expected ${lastSeq}`,
+        );
+      }
+
+      if (existingCp.chainHash.toLowerCase() !== chainHashHex.toLowerCase()) {
+        throw new Error(
+          `Orphan reconciliation mismatch: existing S3 checkpoint chainHash ${existingCp.chainHash} does not match expected ${chainHashHex}`,
+        );
+      }
+
+      signed = existingCp;
+      s3VersionId = getRes.versionId ?? existingVersionId;
       reconciled = true;
     } else {
       // Storage write failed: abort immediately; do not report durable success
@@ -218,7 +347,7 @@ export async function createAuditCheckpoint(params: {
       `SELECT audit_append(
         'service',
         'checkpoint_signer',
-        'checkpoint.created',
+        'audit.checkpoint_created',
         $1::jsonb,
         $2::jsonb
       )`,

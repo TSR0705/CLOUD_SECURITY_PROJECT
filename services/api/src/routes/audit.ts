@@ -393,13 +393,37 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (app, op
         ...(recomputeHashes ? { recomputeHashes: true } : {}),
       });
 
-      // Also inspect latest checkpoint if available
-      let latestCheckpointSummary: {
+      if (!verificationResult.valid) {
+        return reply.status(200).send({
+          status: 'INVALID',
+          valid: false,
+          failedSeq:
+            verificationResult.failedSeq !== undefined
+              ? String(verificationResult.failedSeq)
+              : undefined,
+          error: verificationResult.error,
+          failureCategory: verificationResult.failureCategory,
+        });
+      }
+
+      // Checkpoint verification & external anchoring (bound to verified sequence range)
+      let checkpointSummary: {
         id: string;
         lastSeq: string;
         chainHash: string;
         signatureValid: boolean;
+        prefixMatched: boolean;
+        subsequentEventsCount: number;
       } | null = null;
+
+      const maxVerifiedSeq = verificationResult.toSeq ? BigInt(verificationResult.toSeq) : null;
+      let cpQuery = 'SELECT * FROM audit_checkpoints';
+      const cpParams: unknown[] = [];
+      if (maxVerifiedSeq !== null) {
+        cpQuery += ' WHERE last_seq <= $1';
+        cpParams.push(maxVerifiedSeq.toString());
+      }
+      cpQuery += ' ORDER BY last_seq DESC LIMIT 1';
 
       const cpRes = await db.query<{
         id: string;
@@ -408,7 +432,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (app, op
         signature: Buffer;
         s3_version_id: string;
         created_at: Date;
-      }>('SELECT * FROM audit_checkpoints ORDER BY last_seq DESC LIMIT 1');
+      }>(cpQuery, cpParams);
 
       if (cpRes.rows.length > 0 && cpRes.rows[0]) {
         const cpRow = cpRes.rows[0];
@@ -426,23 +450,81 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (app, op
           sigValid = verifyCheckpointSignature(cp, checkpointPublicKeyPem);
         }
 
-        latestCheckpointSummary = {
+        if (!sigValid) {
+          return reply.status(200).send({
+            status: 'INVALID',
+            valid: false,
+            failedSeq: String(cp.lastSeq),
+            error: 'Audit checkpoint signature verification failed against trusted public key',
+            failureCategory: 'CHECKPOINT_SIGNATURE_INVALID',
+            latestCheckpoint: {
+              id: cp.checkpointId,
+              lastSeq: String(cp.lastSeq),
+              chainHash: cp.chainHash,
+              signatureValid: false,
+              prefixMatched: false,
+              subsequentEventsCount: 0,
+            },
+          });
+        }
+
+        // Verify that the event in audit_events at cp.lastSeq matches cp.chainHash (External Anchoring)
+        const eventRes = await db.query<{ event_hash: Buffer }>(
+          'SELECT event_hash FROM audit_events WHERE seq = $1',
+          [cp.lastSeq],
+        );
+
+        if (eventRes.rows.length === 0 || !eventRes.rows[0]) {
+          return reply.status(200).send({
+            status: 'INVALID',
+            valid: false,
+            failedSeq: String(cp.lastSeq),
+            error: `Audit event referenced by checkpoint at seq ${cp.lastSeq} is missing from audit_events`,
+            failureCategory: 'CHECKPOINT_EVENT_MISSING',
+            latestCheckpoint: {
+              id: cp.checkpointId,
+              lastSeq: String(cp.lastSeq),
+              chainHash: cp.chainHash,
+              signatureValid: true,
+              prefixMatched: false,
+              subsequentEventsCount: 0,
+            },
+          });
+        }
+
+        const dbEventHashHex = eventRes.rows[0].event_hash.toString('hex').toLowerCase();
+        const prefixMatched = dbEventHashHex === cp.chainHash.toLowerCase();
+
+        if (!prefixMatched) {
+          return reply.status(200).send({
+            status: 'INVALID',
+            valid: false,
+            failedSeq: String(cp.lastSeq),
+            error: `Audit chain diverged from signed checkpoint: event_hash at seq ${cp.lastSeq} does not match checkpoint chain_hash`,
+            failureCategory: 'CHECKPOINT_PREFIX_MISMATCH',
+            latestCheckpoint: {
+              id: cp.checkpointId,
+              lastSeq: String(cp.lastSeq),
+              chainHash: cp.chainHash,
+              signatureValid: true,
+              prefixMatched: false,
+              subsequentEventsCount: 0,
+            },
+          });
+        }
+
+        const headSeq = verificationResult.toSeq ? BigInt(verificationResult.toSeq) : 0n;
+        const cpSeq = BigInt(cp.lastSeq);
+        const subsequentEventsCount = headSeq > cpSeq ? Number(headSeq - cpSeq) : 0;
+
+        checkpointSummary = {
           id: cp.checkpointId,
           lastSeq: String(cp.lastSeq),
           chainHash: cp.chainHash,
-          signatureValid: sigValid,
+          signatureValid: true,
+          prefixMatched: true,
+          subsequentEventsCount,
         };
-      }
-
-      if (!verificationResult.valid) {
-        return reply.status(200).send({
-          status: 'INVALID',
-          valid: false,
-          failedSeq: String(verificationResult.failedSeq),
-          error: verificationResult.error,
-          failureCategory: verificationResult.failureCategory,
-          ...(latestCheckpointSummary ? { latestCheckpoint: latestCheckpointSummary } : {}),
-        });
       }
 
       return reply.status(200).send({
@@ -454,7 +536,9 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (app, op
           verificationResult.fromSeq !== undefined ? String(verificationResult.fromSeq) : undefined,
         toSeq:
           verificationResult.toSeq !== undefined ? String(verificationResult.toSeq) : undefined,
-        ...(latestCheckpointSummary ? { latestCheckpoint: latestCheckpointSummary } : {}),
+        ...(checkpointSummary
+          ? { latestCheckpoint: checkpointSummary, checkpoint: checkpointSummary }
+          : {}),
       });
     } catch (err: unknown) {
       const problem = createProblemDetails(
