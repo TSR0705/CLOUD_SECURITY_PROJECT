@@ -136,8 +136,10 @@ services:
       clamav:
         condition: service_healthy
     secrets:
-      - aws_secret_access_key_scanner
-      - db_password
+      - source: aws_secret_access_key_scanner
+        mode: 0444
+      - source: db_password
+        mode: 0444
     environment:
       NODE_ENV: production
       SERVICE_NAME: sug-scanner

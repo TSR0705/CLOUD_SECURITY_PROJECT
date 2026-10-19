@@ -18,9 +18,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SECRETS_DIR="${1:-$REPO_ROOT/secrets}"
 
-# Ensure secrets directory exists with restrictive permissions
+# Ensure secrets directory exists with appropriate permissions (readable by container users)
 mkdir -p "$SECRETS_DIR"
-chmod 700 "$SECRETS_DIR" 2>/dev/null || true
+chmod 755 "$SECRETS_DIR" 2>/dev/null || true
 
 # Determine cryptographic generator
 USE_OPENSSL=0
@@ -116,7 +116,7 @@ for svc in api scanner promoter replicator; do
   fi
 done
 
-# Restrict file permissions where supported
-chmod 600 "$SECRETS_DIR"/* 2>/dev/null || true
+# Set read permissions for non-root container users (e.g. UID 1000)
+chmod 644 "$SECRETS_DIR"/* 2>/dev/null || true
 
 echo "Generated local development secrets under $SECRETS_DIR"
