@@ -75,6 +75,7 @@ jobs:
       - name: Start backing infrastructure services (Docker Compose)
         run: |
           docker compose -f infrastructure/docker/docker-compose.yml up -d --wait postgres localstack fake-gcs-server clamav
+          docker compose -f infrastructure/docker/docker-compose.yml exec -T localstack sh /etc/localstack/init/ready.d/init-s3.sh || true
 
       - name: Run database migrations
         env:

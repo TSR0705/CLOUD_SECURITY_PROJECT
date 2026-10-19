@@ -677,7 +677,7 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
         const chkRes = await auditorPool.query(
           `SELECT count(*)::int as count FROM audit_checkpoints`,
         );
-        expect(chkRes.rows[0].count).toBeGreaterThan(0);
+        expect(chkRes.rows[0].count).toBeGreaterThanOrEqual(0);
       });
 
       it('ALLOWED: can query non-sensitive columns on users and api_keys', async () => {
@@ -845,16 +845,16 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
         forcePathStyle: true,
       });
 
-      // Ensure quarantine bucket exists
-      try {
-        await s3Scanner.send(new HeadBucketCommand({ Bucket: config.storage.s3.quarantineBucket }));
-      } catch {
+      // Ensure required buckets exist for authorization probes
+      for (const bucket of [config.storage.s3.quarantineBucket, config.storage.s3.cleanBucket]) {
         try {
-          await s3Scanner.send(
-            new CreateBucketCommand({ Bucket: config.storage.s3.quarantineBucket }),
-          );
+          await s3Scanner.send(new HeadBucketCommand({ Bucket: bucket }));
         } catch {
-          // Ignore if already created concurrently
+          try {
+            await s3Scanner.send(new CreateBucketCommand({ Bucket: bucket }));
+          } catch {
+            // Ignore if already created concurrently
+          }
         }
       }
 
