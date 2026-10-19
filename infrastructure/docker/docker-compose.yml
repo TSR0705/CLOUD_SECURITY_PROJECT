@@ -128,6 +128,13 @@ services:
       - /tmp:rw,noexec,nosuid,size=128M
     networks:
       - scan
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
     secrets:
       - aws_secret_access_key_scanner
       - db_password
