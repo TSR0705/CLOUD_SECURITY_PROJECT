@@ -16,6 +16,7 @@
     "@fastify/helmet": "13.1.1",
     "@fastify/rate-limit": "11.2.0",
     "@fastify/swagger": "9.9.0",
+    "@sug/audit": "workspace:*",
     "@sug/crypto": "workspace:*",
     "@sug/decision-engine": "workspace:*",
     "@sug/policy-engine": "workspace:*",

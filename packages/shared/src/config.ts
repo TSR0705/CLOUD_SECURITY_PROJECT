@@ -183,6 +183,7 @@ export interface StorageConfig {
     region: string;
     quarantineBucket: string;
     cleanBucket: string;
+    auditBucket: string;
     accessKeyId: string;
   };
   gcs: {
@@ -479,6 +480,7 @@ export function loadConfig(options: ConfigOptions = {}): Config {
   const s3Region = env.AWS_REGION ?? env.AWS_DEFAULT_REGION ?? 'us-east-1';
   const s3QuarantineBucket = env.S3_QUARANTINE_BUCKET ?? 'sug-quarantine-local';
   const s3CleanBucket = env.S3_CLEAN_BUCKET ?? 'sug-clean-local';
+  const s3AuditBucket = env.S3_AUDIT_BUCKET ?? 'sug-audit-local';
   const awsAccessKeyId = env.AWS_ACCESS_KEY_ID ?? 'test';
 
   const gcsEndpoint =
@@ -632,6 +634,7 @@ export function loadConfig(options: ConfigOptions = {}): Config {
         region: s3Region,
         quarantineBucket: s3QuarantineBucket,
         cleanBucket: s3CleanBucket,
+        auditBucket: s3AuditBucket,
         accessKeyId: awsAccessKeyId,
       },
       gcs: {

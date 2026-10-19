@@ -18,8 +18,8 @@ describe('PostgreSQL Schema & Security Invariants (DB-01 to DB-30)', () => {
 
   it('DB-01: Migration succeeds from an empty database and records pgmigrations', async () => {
     const res = await pool.query('SELECT count(*)::int as count FROM pgmigrations');
-    // 9 P3 base migrations + 1 P7 dashboard auth grants migration (010) + 1 P8 policy upload session migration (011) + 1 P17 scan results grants migration (012)
-    expect(res.rows[0].count).toBe(12);
+    // 9 P3 base migrations + 1 P7 dashboard auth grants migration (010) + 1 P8 policy upload session migration (011) + 1 P17 scan results grants migration (012) + 1 P21 audit grants migration (013)
+    expect(res.rows[0].count).toBe(13);
   });
 
   it('DB-02: All 16 required tables exist', async () => {
@@ -270,13 +270,19 @@ describe('PostgreSQL Schema & Security Invariants (DB-01 to DB-30)', () => {
     );
     const chkId = chkRes.rows[0].id;
 
-    await expect(
-      pool.query('UPDATE audit_checkpoints SET last_seq = 888888 WHERE id = $1', [chkId]),
-    ).rejects.toThrow(/audit_checkpoints is append-only/);
+    try {
+      await expect(
+        pool.query('UPDATE audit_checkpoints SET last_seq = 888888 WHERE id = $1', [chkId]),
+      ).rejects.toThrow(/audit_checkpoints is append-only/);
 
-    await expect(
-      pool.query('DELETE FROM audit_checkpoints WHERE id = $1', [chkId]),
-    ).rejects.toThrow(/audit_checkpoints is append-only/);
+      await expect(
+        pool.query('DELETE FROM audit_checkpoints WHERE id = $1', [chkId]),
+      ).rejects.toThrow(/audit_checkpoints is append-only/);
+    } finally {
+      await pool.query("SET session_replication_role = 'replica'");
+      await pool.query('DELETE FROM audit_checkpoints WHERE id = $1', [chkId]);
+      await pool.query("SET session_replication_role = 'origin'");
+    }
   });
 
   it('DB-29: promotion_jobs rejects duplicate decision_id', async () => {

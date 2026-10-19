@@ -182,6 +182,13 @@ describe('Audit Event Hash Chain & Concurrency (DB-08, DB-09, DB-10, Tamper)', (
         `SELECT audit_append('service', 'tamper_follower', 'POST_TAMPER', '{}'::jsonb, '{}'::jsonb)`,
       );
 
+      // Save authentic hash before tampering
+      const origRes = await pool.query<{ event_hash: Buffer }>(
+        'SELECT event_hash FROM audit_events WHERE seq = $1',
+        [targetSeq],
+      );
+      const origHash = origRes.rows[0].event_hash;
+
       // Superuser bypasses trigger temporarily to simulate an adversary tampering with the database
       const client = await pool.connect();
       try {
@@ -214,7 +221,12 @@ describe('Audit Event Hash Chain & Concurrency (DB-08, DB-09, DB-10, Tamper)', (
           expect(verification.failedSeq.toString()).toBe(nextSeq);
         }
       } finally {
-        // Restore table state and trigger in case of failure
+        // Restore table state, authentic hash, and triggers
+        await client.query('ALTER TABLE audit_events DISABLE TRIGGER ALL');
+        await client.query('UPDATE audit_events SET event_hash = $1 WHERE seq = $2', [
+          origHash,
+          targetSeq,
+        ]);
         await client.query('ALTER TABLE audit_events ENABLE TRIGGER ALL');
         client.release();
       }

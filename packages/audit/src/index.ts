@@ -16,3 +16,4 @@ export const AuditInfo: AuditInfo = {
 };
 
 export * from './verify.js';
+export * from './checkpoint.js';
