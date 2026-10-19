@@ -2,7 +2,156 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import yaml from 'yaml';
+interface ParsedServiceConfig {
+  networks: string[];
+  ports: string[];
+  cap_drop: string[];
+  security_opt: string[];
+  tmpfs: string[];
+  secrets: string[];
+  container_name?: string;
+  restart?: string;
+  read_only?: boolean;
+  user?: string;
+  healthcheck?: {
+    test?: unknown;
+    interval?: string;
+    timeout?: string;
+    retries?: string;
+    start_period?: string;
+    [k: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+interface ParsedNetworkConfig {
+  internal?: boolean;
+  [key: string]: unknown;
+}
+
+interface ParsedCompose {
+  services: Record<string, ParsedServiceConfig>;
+  networks: Record<string, ParsedNetworkConfig>;
+  volumes: Record<string, unknown>;
+  secrets: Record<string, unknown>;
+}
+
+function parseComposeYaml(yamlStr: string): ParsedCompose {
+  const result: ParsedCompose = {
+    services: {},
+    networks: {},
+    volumes: {},
+    secrets: {},
+  };
+  const lines = yamlStr.split('\n');
+
+  let currentTop: string | null = null;
+  let currentService: string | null = null;
+  let currentNetwork: string | null = null;
+  let currentField: string | null = null;
+
+  for (const rawLine of lines) {
+    const commentIdx = rawLine.indexOf('#');
+    const line = commentIdx >= 0 ? rawLine.slice(0, commentIdx) : rawLine;
+    if (!line.trim()) continue;
+
+    const indent = line.search(/\S/);
+    const trimmed = line.trim();
+
+    if (indent === 0) {
+      if (trimmed.startsWith('services:')) currentTop = 'services';
+      else if (trimmed.startsWith('networks:')) currentTop = 'networks';
+      else if (trimmed.startsWith('volumes:')) currentTop = 'volumes';
+      else if (trimmed.startsWith('secrets:')) currentTop = 'secrets';
+      else currentTop = null;
+      currentService = null;
+      currentNetwork = null;
+      currentField = null;
+    } else if (indent === 2 && currentTop === 'services') {
+      const match = trimmed.match(/^([^:]+):$/);
+      if (match) {
+        currentService = match[1]!;
+        result.services[currentService] = {
+          networks: [],
+          ports: [],
+          cap_drop: [],
+          security_opt: [],
+          tmpfs: [],
+          secrets: [],
+        };
+        currentField = null;
+      }
+    } else if (indent === 2 && currentTop === 'networks') {
+      const match = trimmed.match(/^([^:]+):$/);
+      if (match) {
+        currentNetwork = match[1]!;
+        result.networks[currentNetwork] = {};
+        currentField = null;
+      }
+    } else if (indent === 4 && currentTop === 'networks' && currentNetwork) {
+      const [k, ...v] = trimmed.split(':');
+      const val = v.join(':').trim();
+      result.networks[currentNetwork][k!.trim()] =
+        val === 'true' ? true : val === 'false' ? false : val;
+    } else if (indent === 4 && currentTop === 'services' && currentService) {
+      const [k, ...v] = trimmed.split(':');
+      const key = k!.trim();
+      const val = v.join(':').trim();
+      currentField = key;
+      if (val === '') {
+        // e.g. networks: or ports:
+      } else if (val === 'true') {
+        result.services[currentService][key] = true;
+      } else if (val === 'false') {
+        result.services[currentService][key] = false;
+      } else {
+        result.services[currentService][key] = val.replace(/^['"]|['"]$/g, '');
+      }
+    } else if (indent === 6 && currentTop === 'services' && currentService && currentField) {
+      if (currentField === 'healthcheck') {
+        const [hk, ...hv] = trimmed.split(':');
+        const hkey = hk!.trim();
+        const hval = hv.join(':').trim();
+        if (!result.services[currentService].healthcheck) {
+          result.services[currentService].healthcheck = {};
+        }
+        if (hkey === 'test' && hval.startsWith('[')) {
+          try {
+            result.services[currentService].healthcheck.test = JSON.parse(hval.replace(/'/g, '"'));
+          } catch {
+            result.services[currentService].healthcheck.test = hval;
+          }
+        } else {
+          result.services[currentService].healthcheck[hkey] = hval;
+        }
+      } else if (currentField === 'secrets') {
+        const item = trimmed.replace(/^-\s*/, '').trim();
+        if (item.startsWith('source:')) {
+          result.services[currentService].secrets.push(
+            item
+              .replace(/^source:\s*/, '')
+              .trim()
+              .replace(/^['"]|['"]$/g, ''),
+          );
+        } else if (item.startsWith('mode:') || item.startsWith('target:')) {
+          // attribute of previous secret object
+        } else {
+          result.services[currentService].secrets.push(item.replace(/^['"]|['"]$/g, ''));
+        }
+      } else if (trimmed.startsWith('- ')) {
+        const item = trimmed
+          .slice(2)
+          .trim()
+          .replace(/^['"]|['"]$/g, '');
+        if (Array.isArray(result.services[currentService][currentField])) {
+          result.services[currentService][currentField].push(item);
+        }
+      }
+    }
+  }
+
+  return result;
+}
 import { execSync } from 'node:child_process';
 import type pg from 'pg';
 import { createPool, createBaseFixtures, type FixtureContext } from '../integration/db/helpers.js';
@@ -742,7 +891,7 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
     it('docker-compose.yml defines strictly segmented networks with internal scan network', () => {
       const composePath = path.resolve(process.cwd(), 'infrastructure/docker/docker-compose.yml');
       const composeContent = fs.readFileSync(composePath, 'utf8');
-      const parsed = yaml.parse(composeContent);
+      const parsed = parseComposeYaml(composeContent);
 
       // 1. Verify networks
       expect(parsed.networks).toBeDefined();
