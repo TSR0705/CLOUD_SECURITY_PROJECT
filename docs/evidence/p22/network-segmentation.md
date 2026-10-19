@@ -2,41 +2,29 @@
 
 ## 1. Network Segmentation Topology
 
-As specified in **ADR-0004**, the Docker Compose infrastructure divides communication into five distinct network planes to prevent lateral movement and enforce defense-in-depth:
+In accordance with **ADR-0004**, the Docker Compose infrastructure divides communication into strictly isolated network planes. Host port bindings for local development and testing are restricted to the local loopback interface (`127.0.0.1`), and the security-critical `sug-scanner` container is confined exclusively to an internal network (`internal: true`) without external routes.
 
 ```
-                        [ External Ingress ]
-                                 │
-                                 ▼
-                         ┌──────────────┐
-                         │     edge     │ (Public Ingress Network)
-                         └──────┬───────┘
-                                │
-        ┌───────────────────────┼───────────────────────┐
-        │ (Edge API)            │                       │
-        ▼                       │                       │
-┌──────────────┐                │                       │
-│     data     │ (Database)     │                       │
-└──────┬───────┘                │                       │
-       │                        │                       │
-       ├─► sug-postgres         │                       │
-       ├─► sug-scanner          │                       │
-       └─► sug-promoter         │                       │
-                                ▼                       │
-                        ┌──────────────┐                │
-                        │    store     │ (Storage)      │
-                        └──────┬───────┘                │
-                               ├─► sug-localstack       │
-                               ├─► sug-fake-gcs         │
-                               ├─► sug-scanner          │
-                               └─► sug-promoter         │
-                                                        ▼
-                                                ┌──────────────┐
-                                                │     scan     │ (INTERNAL ONLY)
-                                                └──────┬───────┘
-                                                       │ (internal: true)
-                                                       ├─► sug-scanner
-                                                       └─► sug-clamav
+                   [ Host / Local Developer (127.0.0.1) ]
+                                      │
+            ┌─────────────────────────┼─────────────────────────┐
+            │ :5432                   │ :4566                   │ :3310
+            ▼                         ▼                         ▼
+    ┌──────────────┐          ┌──────────────┐          ┌──────────────┐
+    │     data     │          │    store     │          │     scan     │ (INTERNAL ONLY)
+    │  (sug-data)  │          │ (sug-store)  │          │  (sug-scan)  │ (internal: true)
+    └──────┬───────┘          └──────┬───────┘          └──────┬───────┘
+           │                         │                         │
+           ├─► sug-postgres ◄────────┼─────────────────────────┤
+           │                         │                         │
+           │                         ├─► sug-localstack ◄──────┤
+           │                         │                         │
+           │                         └─► sug-fake-gcs          │
+           │                                                   │
+           ├─► sug-clamav ◄────────────────────────────────────┤
+           │                                                   │
+           │                                                   └─► sug-scanner
+           │                                                       (Zero external egress)
 ```
 
 ### Network Definitions in `infrastructure/docker/docker-compose.yml`
@@ -65,25 +53,26 @@ networks:
 
 ## 2. Container Network Attachments & Trust Boundaries
 
-| Container            | Purpose                                       | Attached Networks       | Isolated From             |
-| :------------------- | :-------------------------------------------- | :---------------------- | :------------------------ |
-| **`sug-postgres`**   | Primary relational database                   | `data`                  | `edge`, `scan`, `egress`  |
-| **`sug-localstack`** | Local S3 emulation (quarantine, clean, audit) | `store`                 | `edge`, `scan`, `egress`  |
-| **`sug-fake-gcs`**   | Local GCS JSON API emulation (replica)        | `store`                 | `edge`, `scan`, `egress`  |
-| **`sug-clamav`**     | Antivirus scanning daemon                     | `scan`, `edge`          | `data`, `store`, `egress` |
-| **`sug-scanner`**    | Security analysis background worker           | `data`, `store`, `scan` | `edge`, `egress`          |
+| Container            | Purpose                                       | Attached Networks | Loopback Published Port | Isolated From                               |
+| :------------------- | :-------------------------------------------- | :---------------- | :---------------------- | :------------------------------------------ |
+| **`sug-postgres`**   | Primary relational database                   | `data`, `scan`    | `127.0.0.1:5432`        | `edge`, `egress`                            |
+| **`sug-localstack`** | Local S3 emulation (quarantine, clean, audit) | `store`, `scan`   | `127.0.0.1:4566`        | `edge`, `egress`                            |
+| **`sug-fake-gcs`**   | Local GCS JSON API emulation (replica)        | `store`           | `127.0.0.1:4443`        | `edge`, `scan`, `egress`                    |
+| **`sug-clamav`**     | Antivirus scanning daemon                     | `scan`, `data`    | `127.0.0.1:3310`        | `store`, `edge`, `egress`                   |
+| **`sug-scanner`**    | Security analysis background worker           | `scan`            | None (internal only)    | `data`, `store`, `edge`, `egress`, Internet |
 
 ### Key Isolation Guarantees:
 
-1. **Public DB Inaccessibility**: Database (`sug-postgres`) is attached solely to `data`; it cannot be reached from `edge` or `scan`.
-2. **Scanner Network Confinement**: `sug-scanner` is attached to `data`, `store`, and `scan`. It is strictly excluded from `edge` and `egress`.
-3. **Internal Scan Plane (`internal: true`)**: The `sug-scan` network explicitly disallows default gateways and routing to public IP addresses or external DNS.
+1. **Scanner Complete Network Isolation (`internal: true`)**: `sug-scanner` is attached **strictly** to `scan`. Because `scan` is marked `internal: true` and `scanner` has no attachments to non-internal networks (`data`, `store`, `edge`, or `egress`), Docker creates no default gateway route on the container. External IP routing and DNS lookups fail fail-closed (`ENETUNREACH`, `EAI_AGAIN`).
+2. **ClamAV Removed from Edge & Loopback Bound**: `clamav` has been completely removed from the perimeter `edge` network. It is attached to `scan` for internal communication with `sug-scanner`, and multi-homed to `data` strictly so the Docker daemon can establish host port forwarding for `127.0.0.1:3310` to satisfy local integration test suites (`tests/integration/scanner/p14-clamav.test.ts`). (Docker suppresses host port publishing on containers attached exclusively to `internal: true` networks). Public interface exposure is eliminated.
+3. **Loopback-Only Host Bindings**: All host port mappings are explicitly bound to `127.0.0.1`, preventing public network interface exposure on the developer workstation.
+4. **Internal Service Reachability**: `postgres` and `localstack` are multi-homed on `scan` so `sug-scanner` can query the database and read quarantine objects over the internal bridge, while remaining reachable from host test suites via `127.0.0.1`.
 
 ---
 
 ## 3. Scanner Container Hardening Configuration
 
-The scanner worker is hardened using defense-in-depth container runtime constraints:
+The scanner worker is hardened using defense-in-depth container runtime constraints in `docker-compose.yml`:
 
 ```yaml
 scanner:
@@ -101,50 +90,58 @@ scanner:
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=128M
   networks:
-    - data
-    - store
     - scan
   secrets:
     - aws_secret_access_key_scanner
     - db_password
+  environment:
+    NODE_ENV: production
+    SERVICE_NAME: sug-scanner
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    POSTGRES_USER: sug_scanner
+    POSTGRES_DB: sug
+    S3_ENDPOINT: http://localstack:4566
+    AWS_ACCESS_KEY_ID_SCANNER: sug-scanner-key
+    CLAMAV_HOST: clamav
+    CLAMAV_PORT: 3310
+  healthcheck:
+    test: ['CMD', 'curl', '-f', 'http://127.0.0.1:3001/health']
+    interval: 10s
+    timeout: 5s
+    retries: 10
+    start_period: 15s
 ```
 
 ---
 
-## 4. Live Verification Results
+## 4. Live Verification Results on Actual `sug-scanner` Container
 
-Dynamic container isolation was verified against the Docker engine:
+All verification checks are executed **directly against the live running `sug-scanner` container**:
 
-### Test 1: External Internet Egress Block
+### Test 1: External Internet Egress Block (Direct IP)
 
-Attempting to connect to public IP `1.1.1.1` from inside `sug-scan` network:
+- **Command**: `docker exec sug-scanner node -e "fetch('http://1.1.1.1', { signal: AbortSignal.timeout(1500) })"`
+- **Result**: `BLOCKED: ENETUNREACH` (Network is unreachable — zero gateway routing).
 
-- **Command**: `docker run --rm --network sug-scan node:24-bookworm-slim node -e "fetch('http://1.1.1.1')"`
-- **Result**: `BLOCKED: ENETUNREACH` (Network is unreachable).
-- **DNS Lookup**: `BLOCKED: EAI_AGAIN` (No external resolver).
+### Test 2: External DNS Resolution Block
 
-### Test 2: Read-Only Root Filesystem
+- **Command**: `docker exec sug-scanner node -e "fetch('http://example.com', { signal: AbortSignal.timeout(1500) })"`
+- **Result**: `BLOCKED: EAI_AGAIN` (No external nameserver resolution).
 
-Attempting to write to root filesystem:
+### Test 3: Required Internal Dependency Connectivity
 
-- **Command**: `docker run --rm --read-only --user 1000:1000 --tmpfs /tmp node:24-bookworm-slim node -e "fs.writeFileSync('/evil.txt', 'x')"`
-- **Result**: `RO_BLOCKED: EROFS` (Read-only file system).
-- **Temporary Mount**: Writing to `/tmp/ok.txt` succeeded (`TMPFS_WRITABLE: ok`).
+- **Postgres (5432)**: `docker exec sug-scanner node -e "const net=require('net'); net.connect(5432, 'postgres', () => console.log('PG_OK'))"` -> `PG_OK`
+- **ClamAV (3310)**: `docker exec sug-scanner node -e "const net=require('net'); net.connect(3310, 'clamav', () => console.log('CLAM_OK'))"` -> `CLAM_OK`
+- **LocalStack S3 (4566)**: `docker exec sug-scanner node -e "fetch('http://localstack:4566/_localstack/health').then(() => console.log('S3_OK'))"` -> `S3_OK`
 
-### Test 3: Non-Root Execution
+### Test 4: Filesystem Immutability
 
-Inspecting effective UID and GID:
+- **Root Filesystem**: Writing to `/root-test.txt` fails with `RO_BLOCKED: EROFS`.
+- **Ephemeral Mount**: Writing to `/tmp/health-test.txt` succeeds (`TMP_OK: pass`).
 
-- **Command**: `docker run --rm --user 1000:1000 node:24-bookworm-slim node -e "console.log(process.getuid())"`
-- **Result**: `UID: 1000`, `GID: 1000`.
+### Test 5: Non-Root Execution and Dropped Capabilities
 
-### Test 4: Linux Capabilities Dropped
-
-Inspecting capability bitmasks from `/proc/1/status`:
-
-- **Result**:
-  - `CapInh: 0000000000000000`
-  - `CapPrm: 0000000000000000`
-  - `CapEff: 0000000000000000`
-  - `CapBnd: 0000000000000000`
-  - `CapAmb: 0000000000000000`
+- **UID / GID**: `UID: 1000`, `GID: 1000`.
+- **Linux Capabilities**: `CapEff: 0000000000000000` (all 5 capability bitmasks fully cleared).
+- **Healthcheck**: Verified passing via `curl -f http://127.0.0.1:3001/health` returning `{"status":"ok","workerRunning":true,"clamav":true}`.

@@ -31,42 +31,50 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
 
   afterAll(async () => {
     if (fix) {
+      let client: pg.PoolClient | undefined;
       try {
-        await adminPool.query("SET session_replication_role = 'replica'");
-        await adminPool.query(`DELETE FROM cloud_objects WHERE file_version_id = $1`, [
+        client = await adminPool.connect();
+        // Administrator-privileged session configuration strictly scoped to test teardown.
+        // This is never an application runtime path and is used solely to clean up test fixtures.
+        await client.query("SET session_replication_role = 'replica'");
+        await client.query(`DELETE FROM cloud_objects WHERE file_version_id = $1`, [
           fix.fileVersionId,
         ]);
-        await adminPool.query(
+        await client.query(
           `DELETE FROM promotion_jobs WHERE decision_id IN (SELECT id FROM security_decisions WHERE file_version_id = $1)`,
           [fix.fileVersionId],
         );
-        await adminPool.query(`DELETE FROM scan_results WHERE file_version_id = $1`, [
+        await client.query(`DELETE FROM scan_results WHERE file_version_id = $1`, [
           fix.fileVersionId,
         ]);
-        await adminPool.query(`DELETE FROM scan_jobs WHERE file_version_id = $1`, [
+        await client.query(`DELETE FROM scan_jobs WHERE file_version_id = $1`, [fix.fileVersionId]);
+        await client.query(`DELETE FROM security_decisions WHERE file_version_id = $1`, [
           fix.fileVersionId,
         ]);
-        await adminPool.query(`DELETE FROM security_decisions WHERE file_version_id = $1`, [
-          fix.fileVersionId,
-        ]);
-        await adminPool.query(`UPDATE files SET current_version_id = NULL WHERE id = $1`, [
+        await client.query(`UPDATE files SET current_version_id = NULL WHERE id = $1`, [
           fix.fileId,
         ]);
-        await adminPool.query(`DELETE FROM file_versions WHERE file_id = $1`, [fix.fileId]);
-        await adminPool.query(`DELETE FROM files WHERE id = $1`, [fix.fileId]);
-        await adminPool.query(`DELETE FROM upload_sessions WHERE id = $1`, [fix.sessionId]);
-        await adminPool.query(`UPDATE applications SET active_policy_id = NULL WHERE id = $1`, [
+        await client.query(`DELETE FROM file_versions WHERE file_id = $1`, [fix.fileId]);
+        await client.query(`DELETE FROM files WHERE id = $1`, [fix.fileId]);
+        await client.query(`DELETE FROM upload_sessions WHERE id = $1`, [fix.sessionId]);
+        await client.query(`UPDATE applications SET active_policy_id = NULL WHERE id = $1`, [
           fix.appId,
         ]);
-        await adminPool.query(`DELETE FROM security_policies WHERE application_id = $1`, [
-          fix.appId,
-        ]);
-        await adminPool.query(`DELETE FROM api_keys WHERE application_id = $1`, [fix.appId]);
-        await adminPool.query(`DELETE FROM applications WHERE id = $1`, [fix.appId]);
-        await adminPool.query(`DELETE FROM users WHERE id = $1`, [fix.userId]);
-        await adminPool.query("SET session_replication_role = 'origin'");
+        await client.query(`DELETE FROM security_policies WHERE application_id = $1`, [fix.appId]);
+        await client.query(`DELETE FROM api_keys WHERE application_id = $1`, [fix.appId]);
+        await client.query(`DELETE FROM applications WHERE id = $1`, [fix.appId]);
+        await client.query(`DELETE FROM users WHERE id = $1`, [fix.userId]);
       } catch (err) {
         console.warn('Failed to clean up test fixtures in privilege-separation test:', err);
+      } finally {
+        if (client) {
+          try {
+            await client.query("SET session_replication_role = 'origin'");
+          } catch {
+            // Ignore rollback errors during pool release
+          }
+          client.release();
+        }
       }
     }
 
@@ -660,6 +668,71 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
       expect(provider).toBeDefined();
       expect(typeof provider.getByVersion).toBe('function');
     });
+
+    it('executes live storage authorization negative test and documents emulator IAM boundary limitations', async () => {
+      const config = loadConfig({
+        env: {
+          AWS_ACCESS_KEY_ID_SCANNER: 'sug-scanner-key',
+        },
+        secretsDir: path.resolve(process.cwd(), 'secrets'),
+      });
+
+      const scannerCreds = getServiceStorageCredentials(config, 'scanner');
+      const { S3Client, PutObjectCommand, GetObjectCommand } = await import('@aws-sdk/client-s3');
+      const s3Scanner = new S3Client({
+        endpoint: config.storage.s3.endpoint,
+        region: config.storage.s3.region,
+        credentials: {
+          accessKeyId: scannerCreds.accessKeyId,
+          secretAccessKey: scannerCreds.secretAccessKey ?? 'test',
+        },
+        forcePathStyle: true,
+      });
+
+      // 1. Scanner can reach quarantine storage
+      let quarantineAccessible = false;
+      try {
+        await s3Scanner.send(
+          new GetObjectCommand({
+            Bucket: config.storage.s3.quarantineBucket,
+            Key: 'non-existent-probe-key',
+          }),
+        );
+      } catch (err: unknown) {
+        if ((err as { name?: string }).name === 'NoSuchKey') {
+          quarantineAccessible = true;
+        }
+      }
+      expect(quarantineAccessible).toBe(true);
+
+      // 2. Negative Test: Scanner attempts unauthorized write to clean storage
+      // Under LocalStack Community (ADR-0004, DEC-003), IAM policies are not enforced.
+      // This test executes the real negative request and documents whether the emulator enforced boundaries.
+      let cleanWriteResult = 'UNKNOWN';
+      try {
+        await s3Scanner.send(
+          new PutObjectCommand({
+            Bucket: config.storage.s3.cleanBucket,
+            Key: 'unauthorized-scanner-test.txt',
+            Body: 'malicious payload',
+          }),
+        );
+        cleanWriteResult = 'ALLOWED_BY_LOCALSTACK_COMMUNITY_NO_IAM';
+      } catch (err: unknown) {
+        if (
+          (err as { name?: string }).name === 'AccessDenied' ||
+          (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 403
+        ) {
+          cleanWriteResult = 'DENIED_BY_IAM';
+        } else {
+          cleanWriteResult = `ERROR_${(err as Error).name}`;
+        }
+      }
+
+      // Verify and record the empirical reality: LocalStack Community lacks IAM enforcement.
+      // Acceptance criterion for storage-level denial is recorded as blocked/unsupported locally.
+      expect(cleanWriteResult).toBe('ALLOWED_BY_LOCALSTACK_COMMUNITY_NO_IAM');
+    });
   });
 
   // =========================================================================
@@ -683,15 +756,27 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
       expect(parsed.networks.scan.internal).toBe(true);
 
       // 2. Verify service network memberships
-      expect(parsed.services.postgres.networks).toEqual(['data']);
-      expect(parsed.services.localstack.networks).toEqual(['store']);
+      // Dependencies attached to internal scan network for scanner connectivity
+      expect(parsed.services.postgres.networks).toContain('data');
+      expect(parsed.services.postgres.networks).toContain('scan');
+      expect(parsed.services.localstack.networks).toContain('store');
+      expect(parsed.services.localstack.networks).toContain('scan');
       expect(parsed.services['fake-gcs-server'].networks).toEqual(['store']);
       expect(parsed.services.clamav.networks).toContain('scan');
+      expect(parsed.services.clamav.networks).not.toContain('edge'); // ClamAV removed from edge!
 
-      // 3. Verify scanner service hardening configuration
+      // 3. Published ports bound strictly to localhost (127.0.0.1)
+      expect(parsed.services.postgres.ports[0]).toMatch(/^127\.0\.0\.1:/);
+      expect(parsed.services.localstack.ports[0]).toMatch(/^127\.0\.0\.1:/);
+      expect(parsed.services['fake-gcs-server'].ports[0]).toMatch(/^127\.0\.0\.1:/);
+      expect(parsed.services.clamav.ports[0]).toMatch(/^127\.0\.0\.1:/);
+
+      // 4. Verify scanner service hardening configuration
       const scanner = parsed.services.scanner;
       expect(scanner).toBeDefined();
-      expect(scanner.networks).toEqual(['data', 'store', 'scan']);
+      expect(scanner.networks).toEqual(['scan']); // Scanner attached strictly to internal scan network!
+      expect(scanner.networks).not.toContain('data');
+      expect(scanner.networks).not.toContain('store');
       expect(scanner.networks).not.toContain('edge');
       expect(scanner.networks).not.toContain('egress');
 
@@ -700,49 +785,109 @@ describe('Phase P22: Local Privilege Separation & Blast-Radius Mitigation', () =
       expect(scanner.cap_drop).toEqual(['ALL']);
       expect(scanner.security_opt).toContain('no-new-privileges:true');
       expect(scanner.tmpfs).toContain('/tmp:rw,noexec,nosuid,size=128M');
+      expect(scanner.healthcheck).toBeDefined();
+      expect(scanner.healthcheck.test).toEqual([
+        'CMD',
+        'curl',
+        '-f',
+        'http://127.0.0.1:3001/health',
+      ]);
 
-      // 4. Verify secrets attached to scanner
+      // 5. Verify secrets attached to scanner
       expect(scanner.secrets).toContain('aws_secret_access_key_scanner');
       expect(scanner.secrets).toContain('db_password');
     });
 
-    it('validates live docker container security boundaries (network isolation & hardening)', () => {
-      // Dynamic verification using docker CLI if daemon is present
+    it('validates live docker container security boundaries on the actual sug-scanner container', () => {
+      // Dynamic verification directly against the running sug-scanner container
       try {
-        // 1. Ensure sug-scan internal network exists
-        execSync('docker network inspect sug-scan', { stdio: 'pipe' });
+        // 1. Inspect real sug-scanner container configuration
+        const inspectRaw = execSync('docker inspect sug-scanner', {
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+        const [inspectData] = JSON.parse(inspectRaw);
 
-        // 2. Verify internet egress is completely blocked on internal scan network
-        const egressOut = execSync(
-          "docker run --rm --network sug-scan node:24-bookworm-slim node -e \"fetch('http://1.1.1.1', { signal: AbortSignal.timeout(1500) }).then(() => console.log('CONNECTED')).catch(e => console.log('BLOCKED:' + (e.cause?.code || e.message)))\"",
+        expect(inspectData.State.Running).toBe(true);
+        expect(inspectData.HostConfig.ReadonlyRootfs).toBe(true);
+        expect(inspectData.Config.User).toBe('1000:1000');
+        expect(inspectData.HostConfig.CapDrop).toContain('ALL');
+        expect(inspectData.HostConfig.SecurityOpt).toContain('no-new-privileges:true');
+
+        // Verify container is attached strictly to sug-scan (internal: true)
+        const attachedNetworks = Object.keys(inspectData.NetworkSettings.Networks);
+        expect(attachedNetworks).toEqual(['sug-scan']);
+
+        // Verify healthcheck is configured
+        expect(inspectData.Config.Healthcheck).toBeDefined();
+
+        // 2. Dynamic Internet Egress Tests INSIDE actual sug-scanner container
+        // Direct IP egress (1.1.1.1) MUST be blocked
+        const ipOut = execSync(
+          "docker exec sug-scanner node -e \"fetch('http://1.1.1.1', { signal: AbortSignal.timeout(1500) }).then(() => console.log('CONNECTED')).catch(e => console.log('BLOCKED:' + (e.cause?.code || e.message)))\"",
           { encoding: 'utf8', stdio: 'pipe' },
         );
-        expect(egressOut).toMatch(/BLOCKED:(ENETUNREACH|EAI_AGAIN|UND_ERR_CONNECT_TIMEOUT)/);
+        expect(ipOut).toMatch(/BLOCKED:(ENETUNREACH|EAI_AGAIN|UND_ERR_CONNECT_TIMEOUT)/);
 
-        // 3. Verify read-only root filesystem prevents root writes
+        // DNS name resolution (example.com) MUST be blocked
+        const dnsOut = execSync(
+          "docker exec sug-scanner node -e \"fetch('http://example.com', { signal: AbortSignal.timeout(1500) }).then(() => console.log('CONNECTED')).catch(e => console.log('BLOCKED:' + (e.cause?.code || e.message)))\"",
+          { encoding: 'utf8', stdio: 'pipe' },
+        );
+        expect(dnsOut).toMatch(/BLOCKED:(EAI_AGAIN|ENOTFOUND|ENETUNREACH|UND_ERR_CONNECT_TIMEOUT)/);
+
+        // 3. Dynamic Internal Connectivity Tests INSIDE actual sug-scanner container
+        // Reach postgres (port 5432)
+        const pgOut = execSync(
+          "docker exec sug-scanner node -e \"const net=require('net'); const s=net.connect(5432, 'postgres', () => { console.log('PG_OK'); s.destroy(); }); s.on('error', e => console.log('PG_ERR:' + e.message));\"",
+          { encoding: 'utf8', stdio: 'pipe' },
+        );
+        expect(pgOut).toContain('PG_OK');
+
+        // Reach clamav (port 3310)
+        const clamOut = execSync(
+          "docker exec sug-scanner node -e \"const net=require('net'); const s=net.connect(3310, 'clamav', () => { console.log('CLAM_OK'); s.destroy(); }); s.on('error', e => console.log('CLAM_ERR:' + e.message));\"",
+          { encoding: 'utf8', stdio: 'pipe' },
+        );
+        expect(clamOut).toContain('CLAM_OK');
+
+        // Reach localstack (port 4566)
+        const s3Out = execSync(
+          "docker exec sug-scanner node -e \"fetch('http://localstack:4566/_localstack/health').then(r => console.log('S3_OK')).catch(e => console.log('S3_ERR:' + e.message))\"",
+          { encoding: 'utf8', stdio: 'pipe' },
+        );
+        expect(s3Out).toContain('S3_OK');
+
+        // 4. Filesystem Immutability INSIDE actual sug-scanner container
         const roOut = execSync(
-          "docker run --rm --read-only --user 1000:1000 --tmpfs /tmp:rw,noexec,nosuid,size=128M node:24-bookworm-slim node -e \"const fs=require('fs'); try { fs.writeFileSync('/evil.txt', 'x'); } catch(e) { console.log('RO_BLOCKED:' + e.code); } fs.writeFileSync('/tmp/ok.txt', 'pass'); console.log('TMP_OK:' + fs.readFileSync('/tmp/ok.txt', 'utf8'));\"",
+          "docker exec sug-scanner node -e \"const fs=require('fs'); try { fs.writeFileSync('/root-test.txt', 'x'); } catch(e) { console.log('RO_BLOCKED:' + e.code); } fs.writeFileSync('/tmp/health-test.txt', 'pass'); console.log('TMP_OK:' + fs.readFileSync('/tmp/health-test.txt', 'utf8'));\"",
           { encoding: 'utf8', stdio: 'pipe' },
         );
         expect(roOut).toContain('RO_BLOCKED:EROFS');
         expect(roOut).toContain('TMP_OK:pass');
 
-        // 4. Verify non-root user UID 1000
+        // 5. Capability & User verification INSIDE actual sug-scanner container
         const idOut = execSync(
-          'docker run --rm --user 1000:1000 node:24-bookworm-slim node -e "console.log(\'UID:\' + process.getuid());"',
-          { encoding: 'utf8', stdio: 'pipe' },
+          'docker exec sug-scanner node -e "console.log(\'UID:\' + process.getuid());"',
+          {
+            encoding: 'utf8',
+            stdio: 'pipe',
+          },
         );
         expect(idOut).toContain('UID:1000');
 
-        // 5. Verify all capabilities dropped
         const capOut = execSync(
-          'docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true node:24-bookworm-slim sh -c "cat /proc/1/status | grep CapEff"',
-          { encoding: 'utf8', stdio: 'pipe' },
+          'docker exec sug-scanner sh -c "cat /proc/1/status | grep CapEff"',
+          {
+            encoding: 'utf8',
+            stdio: 'pipe',
+          },
         );
         expect(capOut).toContain('CapEff:\t0000000000000000');
       } catch (err) {
-        // If docker daemon is unavailable in the execution environment, fail with clear message
-        throw new Error(`Live docker verification failed: ${(err as Error).message}`);
+        throw new Error(
+          `Live docker verification on sug-scanner failed: ${(err as Error).message}`,
+        );
       }
     });
   });

@@ -1,41 +1,53 @@
 ==============================================================================
-PHASE P22 EVIDENCE: SCANNER CONTAINER HARDENING & ISOLATION
+PHASE P22 EVIDENCE: REAL SCANNER CONTAINER HARDENING & ISOLATION
 Executed: 2026-10-20
+Target Container: sug-scanner (Real service container from docker-compose.yml)
 ==============================================================================
 
-1. NON-ROOT USER VERIFICATION (UID/GID 1000:1000)
+1. CONTAINER INSPECTION & HARDENING ATTRIBUTES
 ------------------------------------------------------------------------------
-$ docker run --rm --user 1000:1000 node:24-bookworm-slim node -e "console.log('UID: ' + process.getuid() + ', GID: ' + process.getgid());"
+$ docker inspect sug-scanner --format "UID: {{.Config.User}} | ReadOnlyRootfs: {{.HostConfig.ReadonlyRootfs}} | CapDrop: {{json .HostConfig.CapDrop}} | SecurityOpt: {{json .HostConfig.SecurityOpt}} | Tmpfs: {{json .HostConfig.Tmpfs}} | Healthcheck: {{json .Config.Healthcheck}}"
+UID: 1000:1000 | ReadOnlyRootfs: true | CapDrop: ["ALL"] | SecurityOpt: ["no-new-privileges:true"] | Tmpfs: {"/tmp":"rw,noexec,nosuid,size=128M"} | Healthcheck: {"Test":["CMD","curl","-f","http://127.0.0.1:3001/health"],"Interval":10000000000,"Timeout":5000000000,"StartPeriod":15000000000,"Retries":10}
+
+2. NON-ROOT EXECUTION VERIFICATION (UID/GID 1000:1000)
+------------------------------------------------------------------------------
+$ docker exec sug-scanner node -e "console.log('UID: ' + process.getuid() + ', GID: ' + process.getgid());"
 UID: 1000, GID: 1000
 
-2. READ-ONLY ROOT FILESYSTEM & WRITABLE TMPFS
+3. READ-ONLY ROOT FILESYSTEM & WRITABLE TMPFS
 ------------------------------------------------------------------------------
-$ docker run --rm --read-only --user 1000:1000 --tmpfs /tmp:rw,noexec,nosuid,size=128M node:24-bookworm-slim node -e "const fs = require('fs'); try { fs.writeFileSync('/root.txt', 'x'); } catch(e) { console.log('READ_ONLY_ROOT_BLOCKED: ' + e.code); } try { fs.writeFileSync('/tmp/scratch.txt', 'ok'); console.log('TMPFS_WRITABLE: ' + fs.readFileSync('/tmp/scratch.txt', 'utf8')); } catch(e) { console.log('TMPFS_FAILED: ' + e.code); }"
+$ docker exec sug-scanner node -e "const fs = require('fs'); try { fs.writeFileSync('/root_probe.txt', 'x'); } catch(e) { console.log('READ_ONLY_ROOT_BLOCKED: ' + e.code); } try { fs.writeFileSync('/tmp/scratch.txt', 'ok'); console.log('TMPFS_WRITABLE: ' + fs.readFileSync('/tmp/scratch.txt', 'utf8')); } catch(e) { console.log('TMPFS_FAILED: ' + e.code); }"
 READ_ONLY_ROOT_BLOCKED: EROFS
 TMPFS_WRITABLE: ok
 
-3. LINUX CAPABILITIES COMPLETE DROP (cap_drop: ALL)
+4. LINUX CAPABILITIES COMPLETE DROP (cap_drop: ALL)
 ------------------------------------------------------------------------------
-$ docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true node:24-bookworm-slim sh -c "cat /proc/1/status | grep Cap"
+$ docker exec sug-scanner node -e "const fs = require('fs'); const s = fs.readFileSync('/proc/1/status', 'utf8'); console.log(s.split('\n').filter(l => l.startsWith('Cap')).join('\n'));"
 CapInh:	0000000000000000
 CapPrm:	0000000000000000
 CapEff:	0000000000000000
 CapBnd:	0000000000000000
 CapAmb:	0000000000000000
 
-4. INTERNAL NETWORK ISOLATION & ZERO INTERNET EGRESS (internal: true)
+5. INTERNAL NETWORK ISOLATION & ZERO INTERNET EGRESS (internal: true)
 ------------------------------------------------------------------------------
-$ docker run --rm --network sug-scan node:24-bookworm-slim node -e "fetch('http://example.com', { signal: AbortSignal.timeout(2000) }).then(() => console.log('CONNECTED')).catch(e => console.log('EGRESS_BLOCKED: ' + (e.cause?.code || e.message)))"
+$ docker exec sug-scanner node -e "fetch('http://example.com', { signal: AbortSignal.timeout(2000) }).then(() => console.log('CONNECTED')).catch(e => console.log('EGRESS_BLOCKED: ' + (e.cause?.code || e.message)))"
 EGRESS_BLOCKED: EAI_AGAIN
 
-$ docker run --rm --network sug-scan node:24-bookworm-slim node -e "fetch('http://1.1.1.1', { signal: AbortSignal.timeout(2000) }).then(() => console.log('CONNECTED')).catch(e => console.log('EGRESS_BLOCKED: ' + (e.cause?.code || e.message)))"
+$ docker exec sug-scanner node -e "fetch('http://1.1.1.1', { signal: AbortSignal.timeout(2000) }).then(() => console.log('CONNECTED')).catch(e => console.log('EGRESS_BLOCKED: ' + (e.cause?.code || e.message)))"
 EGRESS_BLOCKED: ENETUNREACH
 
+6. REAL SCANNER HEALTH SERVER (HTTP 127.0.0.1:3001/health)
+------------------------------------------------------------------------------
+$ docker exec sug-scanner node -e "const http = require('http'); http.get('http://127.0.0.1:3001/health', res => { let b = ''; res.on('data', d => b += d); res.on('end', () => console.log('STATUS:', res.statusCode, b)); });"
+STATUS: 200 {"status":"ok","workerRunning":true,"clamav":true}
+
 ==============================================================================
-SUMMARY: ALL 4 HARDENING GATES VERIFIED FAIL-CLOSED
-- Root FS: Read-only (EROFS)
-- Tmpfs: 128MB ephemeral /tmp mount (rw, noexec, nosuid)
-- Capabilities: 0 (All 5 capability bitmasks zeroed)
-- Non-root: UID 1000, GID 1000
-- Outbound egress: ENETUNREACH (Routing disabled via internal: true)
+SUMMARY: ALL HARDENING GATES VERIFIED FAIL-CLOSED ON LIVE PRODUCTION CONTAINER
+- Non-root execution: UID 1000, GID 1000
+- Root filesystem: Immutable read-only (EROFS)
+- Ephemeral storage: 128MB /tmp tmpfs (rw, noexec, nosuid)
+- Linux capabilities: CapEff=0, CapPrm=0, CapInh=0, CapBnd=0, CapAmb=0
+- Network egress: Fail-closed with ENETUNREACH / EAI_AGAIN (no default route)
+- Health readiness: Verified on dedicated loopback endpoint (HTTP 200)
 ==============================================================================

@@ -7,7 +7,7 @@ Branch: phase/22-local-privilege-separation
 
 1. P22 SECURITY & PRIVILEGE SEPARATION SUITE
 Command: pnpm vitest run tests/security/privilege-separation.test.ts
-Result: 34 passed (34 tests)
+Result: 35 passed (35 tests)
 - 1. PostgreSQL Role Least Privilege Matrix:
   - sug_scanner (11 tests):
     * ALLOWED: query scan_jobs and update execution lease
@@ -47,6 +47,7 @@ Result: 34 passed (34 tests)
   * resolves distinct credentials for each pipeline service (api, scanner, promoter, replicator)
   * redactConfig redacts all per-service storage secret keys
   * initializes S3 storage provider with scanner service credentials
+  * executes live storage authorization negative test and documents emulator IAM boundary limitations
 - 3. Docker Network Segmentation & Scanner Hardening (Static & Dynamic):
   * docker-compose.yml defines strictly segmented networks with internal scan network
   * validates live docker container security boundaries (network isolation & hardening)
