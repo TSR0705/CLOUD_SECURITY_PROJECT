@@ -29,6 +29,7 @@ import { uploadRoutes } from './routes/upload.js';
 import { scansRoutes } from './routes/scans.js';
 import { securityDecisionsRoutes } from './routes/security-decisions.js';
 import { filesRoutes } from './routes/files.js';
+import { auditRoutes } from './routes/audit.js';
 import { LocalKeyProvider, type KeyProvider } from '@sug/crypto';
 import pg from 'pg';
 
@@ -48,6 +49,8 @@ export interface AppOptions {
   logger?: boolean | object | undefined;
   rateLimitMax?: number | undefined;
   rateLimitTimeWindow?: string | number | undefined;
+  checkpointPrivateKeyPem?: string | undefined;
+  checkpointPublicKeyPem?: string | undefined;
 }
 
 const REQUEST_ID_MAX_LENGTH = 64;
@@ -345,6 +348,22 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     storageProvider,
     keyProvider,
     jwtPublicKeyPem,
+  });
+
+  // 16. Hash-Chained Audit System & Checkpoints (P21)
+  const checkpointPrivateKey =
+    options.checkpointPrivateKeyPem ?? config.secrets.checkpointPrivateKey;
+  const checkpointPublicKey =
+    options.checkpointPublicKeyPem ?? derivePublicKeyPem(checkpointPrivateKey);
+
+  await app.register(auditRoutes, {
+    db: authDb,
+    apiKeyService,
+    jwtPublicKeyPem,
+    storageProvider,
+    auditBucket: config.storage.s3.auditBucket,
+    checkpointPrivateKeyPem: checkpointPrivateKey,
+    checkpointPublicKeyPem: checkpointPublicKey,
   });
 
   // Clean shutdown hook

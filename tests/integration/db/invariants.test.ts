@@ -18,8 +18,8 @@ describe('PostgreSQL Schema & Security Invariants (DB-01 to DB-30)', () => {
 
   it('DB-01: Migration succeeds from an empty database and records pgmigrations', async () => {
     const res = await pool.query('SELECT count(*)::int as count FROM pgmigrations');
-    // 9 P3 base migrations + 1 P7 dashboard auth grants migration (010) + 1 P8 policy upload session migration (011) + 1 P17 scan results grants migration (012)
-    expect(res.rows[0].count).toBe(12);
+    // 9 P3 base migrations + 1 P7 dashboard auth grants migration (010) + 1 P8 policy upload session migration (011) + 1 P17 scan results grants migration (012) + 1 P21 audit grants migration (013)
+    expect(res.rows[0].count).toBe(13);
   });
 
   it('DB-02: All 16 required tables exist', async () => {

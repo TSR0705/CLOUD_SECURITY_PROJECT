@@ -18,6 +18,12 @@
     },
     {
       "path": "../../packages/decision-engine"
+    },
+    {
+      "path": "../../packages/crypto"
+    },
+    {
+      "path": "../../packages/audit"
     }
   ]
 }

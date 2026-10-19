@@ -359,6 +359,9 @@ importers:
       '@fastify/swagger':
         specifier: 9.9.0
         version: 9.9.0(supports-color@7.2.0)
+      '@sug/audit':
+        specifier: workspace:*
+        version: link:../../packages/audit
       '@sug/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto

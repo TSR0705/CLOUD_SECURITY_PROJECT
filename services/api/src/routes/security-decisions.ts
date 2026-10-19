@@ -506,9 +506,9 @@ export const securityDecisionsRoutes: FastifyPluginAsync<SecurityDecisionsRouteO
     // Tamper-evident audit event
     await db.query(
       `SELECT audit_append(
-        'decision.reviewed',
         'user',
         $1,
+        'decision.reviewed',
         $2::jsonb,
         $3::jsonb
       )`,

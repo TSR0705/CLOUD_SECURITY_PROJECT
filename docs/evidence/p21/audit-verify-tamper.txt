@@ -1,0 +1,165 @@
+=== PHASE P21 AUDIT CHAIN VERIFICATION & TAMPER EVIDENCE ===
+Date: 2026-10-19T06:44:57.636Z
+Branch: phase/21-audit-chain
+Target: Secure Upload Gateway Phase P21 — Hash-Chained Audit System & Checkpoints
+Database: PostgreSQL 18 (sug_admin, Docker port 5433)
+Object Storage: LocalStack S3 (sug-audit-local)
+
+================================================================================
+1. BASELINE AUDIT CHAIN VERIFICATION (UNTAMPERED)
+================================================================================
+
+Verification Method:
+  verifyAuditChainFromDb(pool, { batchSize: 500 })
+  Streams all audit records in order from seq 1 to HEAD.
+
+Output:
+{
+  "valid": true,
+  "verifiedCount": 88801,
+  "headHash": "4bd2ccec4592cde06593b44d0df336097c415f8a34c26ffa3e4d1cef3df12b50",
+  "fromSeq": "1",
+  "toSeq": "89738"
+}
+
+HTTP Endpoint Verification:
+  GET /audit/verify
+  Authorization: Bearer <Auditor JWT>
+
+Response (HTTP 200 OK):
+{
+  "status": "VALID",
+  "valid": true,
+  "verifiedCount": 88801,
+  "headHash": "4bd2ccec4592cde06593b44d0df336097c415f8a34c26ffa3e4d1cef3df12b50",
+  "fromSeq": "1",
+  "toSeq": "89738"
+}
+
+================================================================================
+2. ADVERSARIAL TAMPER SCENARIO A: CORRUPT EVENT_HASH (SUPERUSER)
+================================================================================
+
+Attack Mechanism:
+  Superuser temporarily disables table triggers:
+    ALTER TABLE audit_events DISABLE TRIGGER ALL;
+    UPDATE audit_events SET event_hash = <corruptedHash> WHERE seq = 89739;
+    ALTER TABLE audit_events ENABLE TRIGGER ALL;
+
+Observed Verification Output:
+{
+  "valid": false,
+  "failedSeq": "89740",
+  "error": "Hash chain broken at seq 89740: prev_hash does not match predecessor event_hash",
+  "failureCategory": "CHAIN_BROKEN"
+}
+
+HTTP Endpoint Response:
+  GET /audit/verify
+  Response (HTTP 200 OK):
+  {
+    "status": "INVALID",
+    "valid": false,
+    "failedSeq": "89740",
+    "error": "Hash chain broken at seq 89740: prev_hash does not match predecessor event_hash",
+    "failureCategory": "CHAIN_BROKEN"
+  }
+
+Security Invariant Verified:
+  Out-of-band mutation of stored event_hash breaks the cryptographic linkage.
+  Verification halts fail-closed at the immediate successor sequence number.
+
+Restoration:
+  Superuser restores authentic event_hash.
+
+================================================================================
+3. ADVERSARIAL TAMPER SCENARIO B: MODIFY PAYLOAD DETAILS (BYTE-FOR-BYTE)
+================================================================================
+
+Attack Mechanism:
+  Superuser mutates jsonb details of an existing event without updating event_hash:
+    ALTER TABLE audit_events DISABLE TRIGGER ALL;
+    UPDATE audit_events SET details = '{"amount": 999999, "authorized": false}'::jsonb WHERE seq = 89741;
+    ALTER TABLE audit_events ENABLE TRIGGER ALL;
+
+Observed Verification Output (Byte-for-Byte Recomputation):
+  verifyAuditChainFromDb(pool, { fromSeq: '89741', toSeq: '89741', recomputeHashes: true })
+
+Output:
+{
+  "valid": false,
+  "failedSeq": "89741",
+  "error": "Event hash mismatch at seq 89741: computed hash does not match stored event_hash (tampered event content)",
+  "failureCategory": "HASH_MISMATCH"
+}
+
+HTTP Endpoint Response:
+  GET /audit/verify?from_seq=89741&to_seq=89741&recompute_hashes=true
+  Response (HTTP 200 OK):
+  {
+    "status": "INVALID",
+    "valid": false,
+    "failedSeq": "89741",
+    "error": "Event hash mismatch at seq 89741: computed hash does not match stored event_hash (tampered event content)",
+    "failureCategory": "HASH_MISMATCH"
+  }
+
+Security Invariant Verified:
+  Byte-for-byte SHA-256 recomputation matching PostgreSQL's audit_append digest:
+    digest(prev_hash || convert_to(actor_type || '|' || actor_id || '|' || action || '|' ||
+           occurred_at || '|' || refs || '|' || details, 'UTF8'), 'sha256')
+  Identifies payload tampering directly at the modified record's seq.
+
+Restoration:
+  Superuser restores authentic details.
+
+================================================================================
+4. ADVERSARIAL TAMPER SCENARIO C: INTERIOR EVENT DELETION (SUPERUSER)
+================================================================================
+
+Attack Mechanism:
+  Superuser deletes an interior audit row with triggers disabled:
+    ALTER TABLE audit_events DISABLE TRIGGER ALL;
+    DELETE FROM audit_events WHERE seq = 89707;
+    ALTER TABLE audit_events ENABLE TRIGGER ALL;
+
+Observed Verification Output:
+{
+  "valid": false,
+  "failedSeq": "89708",
+  "error": "Hash chain broken at seq 89708: prev_hash does not match predecessor event_hash",
+  "failureCategory": "CHAIN_BROKEN"
+}
+
+Security Invariant Verified:
+  Sequence gaps or missing records cannot be hidden because the successor row's
+  prev_hash binds strictly to the deleted event's event_hash.
+  Verification detects the broken link at the successor sequence.
+
+Restoration:
+  Row restored using OVERRIDING SYSTEM VALUE with triggers temporarily disabled.
+
+================================================================================
+5. POST-RESTORATION CHAIN VERIFICATION
+================================================================================
+
+Output:
+{
+  "valid": true,
+  "verifiedCount": 88804,
+  "headHash": "63ba32ed1dc68f0c9fd8200d0113de3250dc7b4a14d8c98da4cf5f678edcea2f",
+  "fromSeq": "1",
+  "toSeq": "89741"
+}
+
+HTTP Endpoint Response:
+  GET /audit/verify
+  Response (HTTP 200 OK):
+  {
+    "status": "VALID",
+    "valid": true,
+    "verifiedCount": 88804,
+    "headHash": "63ba32ed1dc68f0c9fd8200d0113de3250dc7b4a14d8c98da4cf5f678edcea2f",
+    "fromSeq": "1",
+    "toSeq": "89741"
+  }
