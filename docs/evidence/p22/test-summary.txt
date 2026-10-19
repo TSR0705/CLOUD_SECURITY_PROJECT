@@ -1,0 +1,76 @@
+==============================================================================
+PHASE P22 ACCEPTANCE & SECURITY TEST SUMMARY
+Generated: 2026-10-20
+Target: Phase P22 — Local Privilege Separation & Blast-Radius Mitigation
+Branch: phase/22-local-privilege-separation
+==============================================================================
+
+1. P22 SECURITY & PRIVILEGE SEPARATION SUITE
+Command: pnpm vitest run tests/security/privilege-separation.test.ts
+Result: 34 passed (34 tests)
+- 1. PostgreSQL Role Least Privilege Matrix:
+  - sug_scanner (11 tests):
+    * ALLOWED: query scan_jobs and update execution lease
+    * ALLOWED: insert scan_results for assigned job
+    * ALLOWED: query scan_results, file_versions, upload_sessions, security_policies
+    * ALLOWED: append immutable audit records via audit_append()
+    * DENIED: insert security_decisions (cannot decide own verdict)
+    * DENIED: insert promotion_jobs (cannot trigger promotion)
+    * DENIED: insert or update cloud_objects (cannot write clean records)
+    * DENIED: insert, update, or delete files
+    * DENIED: access sensitive user or authentication tables (users, api_keys, refresh_tokens, apps)
+    * DENIED: create or insert audit_checkpoints
+    * DENIED: scanner lacks UPDATE/DELETE on scan_results, and table is immutable via trigger
+  - sug_api (5 tests):
+    * ALLOWED: manage upload sessions and create files
+    * ALLOWED: execute audit_checkpoint_create via SECURITY DEFINER function
+    * DENIED: directly INSERT into audit_checkpoints table
+    * DENIED: insert security_decisions, promotion_jobs, or cloud_objects
+    * DENIED: delete users or update user password_hash / role
+  - sug_promoter (4 tests):
+    * ALLOWED: create promotion jobs and insert clean cloud_objects
+    * ALLOWED: update file status to PROMOTED
+    * DENIED: query or modify user credentials or refresh tokens
+    * DENIED: insert scan results or direct audit checkpoints
+  - sug_replicator (4 tests):
+    * ALLOWED: insert replica zone cloud_objects
+    * DENIED: insert clean or quarantine zone cloud_objects (enforced by RLS)
+    * DENIED: insert direct audit checkpoints (revoked in 014)
+    * DENIED: modify scan_jobs, security_decisions, or files
+  - sug_auditor (5 tests):
+    * ALLOWED: query all operational, scan, decision, and audit tables
+    * ALLOWED: query non-sensitive columns on users and api_keys
+    * DENIED: select users.password_hash or api_keys.key_hmac
+    * DENIED: access refresh_tokens table
+    * DENIED: zero write permissions across entire database
+- 2. Local Storage Credential Scoping & Isolation:
+  * resolves distinct credentials for each pipeline service (api, scanner, promoter, replicator)
+  * redactConfig redacts all per-service storage secret keys
+  * initializes S3 storage provider with scanner service credentials
+- 3. Docker Network Segmentation & Scanner Hardening (Static & Dynamic):
+  * docker-compose.yml defines strictly segmented networks with internal scan network
+  * validates live docker container security boundaries (network isolation & hardening)
+
+2. DATABASE INVARIANTS & MIGRATION REPRODUCIBILITY (DB-01 to DB-30)
+Command: pnpm vitest run tests/integration/db/invariants.test.ts
+Result: 15 passed (15 tests)
+- DB-01: Migration succeeds from an empty database and records 14 pgmigrations
+- DB-30: Clean database recreation and migration reproducibility
+
+3. REGRESSION INTEGRATION SUITES
+- P20 Promotion: pnpm vitest run tests/integration/promotion/p20-promotion.test.ts
+  Result: 12 passed (12 tests)
+- P21 Audit Chain: pnpm vitest run tests/integration/audit/p21-audit.test.ts
+  Result: 19 passed (19 tests)
+- P13-P17 Scanner Suite: pnpm vitest run tests/integration/scanner/
+  Result: 61 passed (61 tests across 6 suites, including real ClamAV daemon kill recovery)
+
+4. CODE QUALITY & CI GATES
+- Typecheck: pnpm typecheck (tsc -b) -> PASSED (0 errors)
+- Lint: pnpm lint (eslint .) -> PASSED (0 errors, 0 warnings)
+- Formatting: pnpm format:check (prettier --check .) -> PASSED (All matched files use Prettier code style)
+- OpenAPI: pnpm openapi:check -> PASSED (OK: docs/openapi.json is up to date)
+
+==============================================================================
+CONCLUSION: ALL GATES PASS. NO REGRESSIONS. READY FOR PHASE 22 COMMIT.
+==============================================================================

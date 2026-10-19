@@ -1,0 +1,41 @@
+==============================================================================
+PHASE P22 EVIDENCE: SCANNER CONTAINER HARDENING & ISOLATION
+Executed: 2026-10-20
+==============================================================================
+
+1. NON-ROOT USER VERIFICATION (UID/GID 1000:1000)
+------------------------------------------------------------------------------
+$ docker run --rm --user 1000:1000 node:24-bookworm-slim node -e "console.log('UID: ' + process.getuid() + ', GID: ' + process.getgid());"
+UID: 1000, GID: 1000
+
+2. READ-ONLY ROOT FILESYSTEM & WRITABLE TMPFS
+------------------------------------------------------------------------------
+$ docker run --rm --read-only --user 1000:1000 --tmpfs /tmp:rw,noexec,nosuid,size=128M node:24-bookworm-slim node -e "const fs = require('fs'); try { fs.writeFileSync('/root.txt', 'x'); } catch(e) { console.log('READ_ONLY_ROOT_BLOCKED: ' + e.code); } try { fs.writeFileSync('/tmp/scratch.txt', 'ok'); console.log('TMPFS_WRITABLE: ' + fs.readFileSync('/tmp/scratch.txt', 'utf8')); } catch(e) { console.log('TMPFS_FAILED: ' + e.code); }"
+READ_ONLY_ROOT_BLOCKED: EROFS
+TMPFS_WRITABLE: ok
+
+3. LINUX CAPABILITIES COMPLETE DROP (cap_drop: ALL)
+------------------------------------------------------------------------------
+$ docker run --rm --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true node:24-bookworm-slim sh -c "cat /proc/1/status | grep Cap"
+CapInh:	0000000000000000
+CapPrm:	0000000000000000
+CapEff:	0000000000000000
+CapBnd:	0000000000000000
+CapAmb:	0000000000000000
+
+4. INTERNAL NETWORK ISOLATION & ZERO INTERNET EGRESS (internal: true)
+------------------------------------------------------------------------------
+$ docker run --rm --network sug-scan node:24-bookworm-slim node -e "fetch('http://example.com', { signal: AbortSignal.timeout(2000) }).then(() => console.log('CONNECTED')).catch(e => console.log('EGRESS_BLOCKED: ' + (e.cause?.code || e.message)))"
+EGRESS_BLOCKED: EAI_AGAIN
+
+$ docker run --rm --network sug-scan node:24-bookworm-slim node -e "fetch('http://1.1.1.1', { signal: AbortSignal.timeout(2000) }).then(() => console.log('CONNECTED')).catch(e => console.log('EGRESS_BLOCKED: ' + (e.cause?.code || e.message)))"
+EGRESS_BLOCKED: ENETUNREACH
+
+==============================================================================
+SUMMARY: ALL 4 HARDENING GATES VERIFIED FAIL-CLOSED
+- Root FS: Read-only (EROFS)
+- Tmpfs: 128MB ephemeral /tmp mount (rw, noexec, nosuid)
+- Capabilities: 0 (All 5 capability bitmasks zeroed)
+- Non-root: UID 1000, GID 1000
+- Outbound egress: ENETUNREACH (Routing disabled via internal: true)
+==============================================================================
