@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import type { ApiKeyService } from '../auth/service.js';
 import { StreamingUploadService } from '../upload/streaming-service.js';
 import { createProblemDetails, ErrorTypes } from '../errors/problem.js';
@@ -88,7 +88,12 @@ export const uploadRoutes: FastifyPluginAsync<UploadRouteOptions> = async (app, 
     }
 
     const params = request.params as { id: string };
-    const requestStream = (request.body as Readable) || request.raw;
+    const requestStream =
+      request.body && typeof (request.body as { on?: unknown }).on === 'function'
+        ? (request.body as Readable)
+        : Buffer.isBuffer(request.body) || typeof request.body === 'string'
+          ? Readable.from(request.body)
+          : request.raw;
 
     try {
       const result = await streamingUploadService.handleStreamingUpload({
