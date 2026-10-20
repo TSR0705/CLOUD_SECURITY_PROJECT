@@ -96,6 +96,11 @@ describe('Phase P23: End-to-End Lifecycle & Multi-Tenant Isolation', () => {
     const config = loadConfig({ secretsDir });
     adminPool = createPool('sug_admin', 'sug_dev_password');
 
+    // Drain pre-existing queued scan jobs from prior test suites
+    await adminPool.query(
+      `UPDATE scan_jobs SET status = 'SUCCEEDED', finished_at = now() WHERE status IN ('QUEUED', 'RUNNING')`,
+    );
+
     // 1. Ensure LocalStack buckets exist with versioning enabled
     const rawS3 = new S3Client({
       endpoint: S3_ENDPOINT,
@@ -226,6 +231,7 @@ describe('Phase P23: End-to-End Lifecycle & Multi-Tenant Isolation', () => {
     // 5. Start Fastify app listening on dynamic port
     app = await createApp({
       config,
+      authDb: adminPool,
       storageProvider: s3Provider,
       keyProvider,
       logger: false,
@@ -269,8 +275,15 @@ describe('Phase P23: End-to-End Lifecycle & Multi-Tenant Isolation', () => {
   });
 
   afterAll(async () => {
+    if (adminPool) {
+      await adminPool
+        .query(
+          `UPDATE scan_jobs SET status = 'SUCCEEDED', finished_at = now() WHERE status IN ('QUEUED', 'RUNNING')`,
+        )
+        .catch(() => {});
+      await adminPool.end();
+    }
     if (app) await app.close();
-    if (adminPool) await adminPool.end();
   });
 
   /**
@@ -497,7 +510,10 @@ describe('Phase P23: End-to-End Lifecycle & Multi-Tenant Isolation', () => {
       expect(uploadRes.sha256).toBe(cleanSha);
 
       // 2. Scanner worker processes the scan job
-      const scanOutcome = await scannerWorker.runOnce();
+      let scanOutcome = await scannerWorker.runOnce();
+      while (scanOutcome.job && scanOutcome.job.id !== uploadRes.scanJobId) {
+        scanOutcome = await scannerWorker.runOnce();
+      }
       expect(scanOutcome.job).not.toBeNull();
       expect(scanOutcome.result?.success).toBe(true);
 
@@ -574,7 +590,10 @@ describe('Phase P23: End-to-End Lifecycle & Multi-Tenant Isolation', () => {
       });
 
       // 2. Scanner worker processes the scan job
-      const scanOutcome = await scannerWorker.runOnce();
+      let scanOutcome = await scannerWorker.runOnce();
+      while (scanOutcome.job && scanOutcome.job.id !== uploadRes.scanJobId) {
+        scanOutcome = await scannerWorker.runOnce();
+      }
       expect(scanOutcome.job).not.toBeNull();
       expect(scanOutcome.result?.clamav?.signature).toBe('Eicar-Test-Signature');
 
@@ -638,7 +657,10 @@ describe('Phase P23: End-to-End Lifecycle & Multi-Tenant Isolation', () => {
       });
 
       // 2. Scanner worker completes scan
-      await scannerWorker.runOnce();
+      let scanOutcome = await scannerWorker.runOnce();
+      while (scanOutcome.job && scanOutcome.job.id !== uploadRes.scanJobId) {
+        scanOutcome = await scannerWorker.runOnce();
+      }
 
       // 3. Insert a SUSPICIOUS finding representing heuristic policy alert
       await adminPool.query(

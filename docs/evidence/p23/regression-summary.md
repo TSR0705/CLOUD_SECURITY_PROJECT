@@ -4,7 +4,7 @@ This report documents the verification of the complete automated test suite acro
 
 - **Command**: `pnpm test` (`vitest run`)
 - **Test Files**: 76 passed (76 total)
-- **Tests**: 1,075 passed (1,075 total)
+- **Tests**: 1,076 passed (1,076 total)
 - **Failures / Errors**: 0
 - **Duration**: ~88 seconds
 
@@ -28,9 +28,9 @@ This report documents the verification of the complete automated test suite acro
   - Scenario 3: Client abort & truncated stream handling.
   - Scenario 4: Concurrent duplicate job claim race via SKIP LOCKED (20 workers).
   - Scenario 5: Multi-tenant concurrency benchmark under parallel load.
-- `tests/integration/db/invariants-verifier.test.ts`: **3 passed**
+- `tests/integration/db/invariants-verifier.test.ts`: **4 passed**
   - Validation of all 16 invariant SQL queries.
-  - Verification of fail-closed detection on intentional database corruption.
+  - Verification of fail-closed detection on intentional database corruption (INV-01A, INV-04A, INV-03B).
 
 ### 2. Historical Track 1 & Track 2 Suites (P1 - P20)
 

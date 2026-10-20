@@ -109,4 +109,35 @@ describe('Canonical SQL Invariants Verifier (invariants.sql)', () => {
     expect(postReport.ok).toBe(true);
     expect(postReport.totalViolations).toBe(0);
   });
+
+  it('detects and flags audit hash chain linkage corruption (INV-03B)', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SET LOCAL session_replication_role = 'replica'");
+
+      // Alter prev_hash on an interior audit event to break linkage with predecessor
+      await client.query(
+        `UPDATE audit_events
+         SET prev_hash = '\\x0000000000000000000000000000000000000000000000000000000000000000'
+         WHERE seq = (SELECT seq FROM audit_events ORDER BY seq ASC OFFSET 1 LIMIT 1)`,
+      );
+
+      const report = await verifyInvariants(client as unknown as pg.Pool);
+      expect(report.ok).toBe(false);
+      expect(report.totalViolations).toBeGreaterThan(0);
+
+      const inv03b = report.checks.find((c) => c.invariant_id === 'INV-03B');
+      expect(inv03b).toBeDefined();
+      expect(inv03b?.violations).toBeGreaterThan(0);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+
+    // Clean state restored
+    const postReport = await verifyInvariants(pool);
+    expect(postReport.ok).toBe(true);
+    expect(postReport.totalViolations).toBe(0);
+  });
 });

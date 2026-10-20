@@ -84,6 +84,8 @@ jobs:
         run: pnpm db:migrate
 
       - name: Start application services (Scanner)
+        env:
+          SCANNER_POLL_INTERVAL_MS: '0'
         run: |
           docker compose -f infrastructure/docker/docker-compose.yml up -d --wait --wait-timeout 120 scanner || {
             echo "=== SCANNER STARTUP FAILED - CONTAINER LOGS ==="

@@ -207,6 +207,13 @@ describe('Phase P23: Chaos, Fault Injection & Invariant Enforcement', () => {
   });
 
   afterAll(async () => {
+    if (adminPool) {
+      await adminPool
+        .query(
+          `UPDATE scan_jobs SET status = 'SUCCEEDED', finished_at = now() WHERE status IN ('QUEUED', 'RUNNING')`,
+        )
+        .catch(() => {});
+    }
     if (app) {
       if (typeof app.server?.closeAllConnections === 'function') {
         app.server.closeAllConnections();

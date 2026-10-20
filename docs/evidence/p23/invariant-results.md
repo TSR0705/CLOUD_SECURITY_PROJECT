@@ -36,8 +36,9 @@ This document records the verification results of the canonical `invariants.sql`
 
 The verifier itself is tested against synthetic violations in `tests/integration/db/invariants-verifier.test.ts`:
 
-- **Synthetic Corrupted Audit Hash**: Injected single-row corruption in audit chain. Verifier immediately catches breach and reports failure on `INV-03B`.
-- **Synthetic Clean Object Without Decision**: Injected unauthorized clean object row. Verifier catches breach and reports failure on `INV-01A`.
-- **Clean Baseline**: Verifier passes with 0 violations.
+- **Clean Baseline**: Verifier passes with 0 violations across all 16 canonical checks.
+- **Synthetic Clean Object Without Decision (INV-01A)**: Injected unauthorized clean object row. Verifier catches breach and reports failure on `INV-01A`.
+- **Synthetic Multi-Tenant ID Mismatch (INV-04A)**: Injected cross-tenant file pointing to mismatched upload session. Verifier catches breach and reports failure on `INV-04A`.
+- **Synthetic Corrupted Audit Hash Linkage (INV-03B)**: Injected corrupted `prev_hash` breaking SHA-256 chain. Verifier catches breach and reports failure on `INV-03B`.
 
-Result: 3 of 3 verifier integration tests pass.
+Result: 4 of 4 verifier integration tests pass.

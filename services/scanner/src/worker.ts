@@ -319,7 +319,9 @@ export class ScannerWorker {
   start(): void {
     if (this.running) return;
     this.running = true;
-    this.activePromise = this.loop();
+    if (this.pollIntervalMs > 0) {
+      this.activePromise = this.loop();
+    }
     if (this.enableReaper) {
       this.reaperPromise = this.reaperLoop();
     }
