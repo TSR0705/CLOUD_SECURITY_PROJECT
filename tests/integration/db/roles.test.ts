@@ -25,6 +25,10 @@ describe('Database Roles & Least Privilege Authorization (DB-23 to DB-28, RLS)',
   });
 
   afterAll(async () => {
+    // Clean up mock rows inserted for role permission verification
+    await adminPool.query(
+      `DELETE FROM cloud_objects WHERE storage_version_id IN ('v-rep-1', 'v-clean-promoter-1')`,
+    );
     await adminPool.end();
     await apiPool.end();
     await scannerPool.end();

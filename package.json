@@ -18,6 +18,8 @@
     "db:rollback": "node scripts/migrate.mjs down",
     "db:create": "node scripts/migrate.mjs create",
     "db:types": "kysely-codegen --out-file packages/shared/src/db.ts --dialect postgres",
+    "db:invariants": "node scripts/run-invariants.ts",
+    "chaos": "node chaos.ts",
     "rules:validate": "node scripts/validate-yara-rules.mjs packages/scanner/rules"
   },
   "devDependencies": {

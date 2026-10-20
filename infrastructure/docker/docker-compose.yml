@@ -152,7 +152,7 @@ services:
       AWS_ACCESS_KEY_ID_SCANNER: sug-scanner-key
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
-      SCANNER_POLL_INTERVAL_MS: ${SCANNER_POLL_INTERVAL_MS:-300000}
+      SCANNER_POLL_INTERVAL_MS: ${SCANNER_POLL_INTERVAL_MS:-1000}
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://127.0.0.1:3001/health']
       interval: 10s

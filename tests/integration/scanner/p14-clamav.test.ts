@@ -112,10 +112,12 @@ describe('Phase P14: ClamAV Integration & EICAR Scanning (DoD Test Suite)', () =
 
   beforeEach(async () => {
     await adminPool.query(
-      `DELETE FROM scan_jobs WHERE id NOT IN (SELECT scan_job_id FROM scan_results WHERE scan_job_id IS NOT NULL)`,
+      `DELETE FROM scan_jobs
+       WHERE id NOT IN (SELECT scan_job_id FROM scan_results WHERE scan_job_id IS NOT NULL)
+         AND id NOT IN (SELECT scan_job_id FROM security_decisions WHERE scan_job_id IS NOT NULL)`,
     );
     await adminPool.query(
-      `UPDATE scan_jobs SET status = 'SUCCEEDED' WHERE status IN ('QUEUED', 'RUNNING')`,
+      `UPDATE scan_jobs SET status = 'SUCCEEDED', finished_at = now() WHERE status IN ('QUEUED', 'RUNNING')`,
     );
   });
 

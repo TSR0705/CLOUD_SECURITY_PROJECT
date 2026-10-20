@@ -293,6 +293,15 @@ export const uploadSessionRoutes: FastifyPluginAsync<UploadSessionRouteOptions> 
     handler: handleCreateSession,
   });
 
+  app.post('/api/v1/upload-sessions', {
+    preHandler: [authHook, scopeHook, tenantHook],
+    schema: {
+      ...uploadSessionSchema,
+      hide: true,
+    },
+    handler: handleCreateSession,
+  });
+
   app.post('/upload/session', {
     preHandler: [authHook, scopeHook, tenantHook],
     schema: {
